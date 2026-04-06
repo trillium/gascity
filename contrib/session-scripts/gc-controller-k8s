@@ -310,9 +310,10 @@ case "$op" in
       sleep 1
     done
 
-    # Copy city directory into the controller pod.
+    # Stage city directory into a temp location inside the pod.
+    # CMD will gc init --from here into /city/ (which must be clean for init).
     echo "Copying city directory..."
-    "${KUBECTL[@]}" cp "$city_path/." "$POD_NAME:/city/" || {
+    "${KUBECTL[@]}" cp "$city_path/." "$POD_NAME:/tmp/city-src/" || {
       echo "deploy: failed to copy city directory" >&2
       exit 1
     }
@@ -329,6 +330,18 @@ case "$op" in
       fi
       sleep 1
     done
+
+    # Initialize bd databases on the controller pod so scale_check commands
+    # can query beads via the dolt server. This is K8s-specific — local
+    # tmux/docker deploys don't need it (bd uses local .beads/ dirs).
+    echo "Initializing beads on controller..."
+    init_controller_beads "$city_path/city.toml"
+
+    # Create the beads runner pod (gc-beads-k8s uses it for bd operations).
+    echo "Starting beads runner..."
+    GC_K8S_NAMESPACE="$NS" GC_K8S_IMAGE="$AGENT_IMAGE" \
+      "$(dirname "$0")/../beads-scripts/gc-beads-k8s" ensure-ready
+
 
     # Signal gc start to begin.
     "${KUBECTL[@]}" exec "$POD_NAME" -- touch /city/.gc-start
