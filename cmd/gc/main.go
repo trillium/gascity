@@ -16,6 +16,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	beadsexec "github.com/gastownhall/gascity/internal/beads/exec"
 	"github.com/gastownhall/gascity/internal/citylayout"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/supervisor"
@@ -558,6 +559,21 @@ func openCityStore(stderr io.Writer, cmdName string) (beads.Store, int) {
 		return nil, 1
 	}
 	return store, 0
+}
+
+// resolveHQPrefixForPath loads the city config and returns the HQ beads prefix.
+// Returns empty string on any error (best-effort).
+func resolveHQPrefixForPath(cityPath string) string {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	data, err := os.ReadFile(tomlPath)
+	if err != nil {
+		return ""
+	}
+	cfg, err := config.Parse(data)
+	if err != nil {
+		return ""
+	}
+	return config.EffectiveHQPrefix(cfg)
 }
 
 // openCityStoreAt opens a bead store at the given city path.
