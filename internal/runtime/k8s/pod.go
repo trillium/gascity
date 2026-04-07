@@ -319,6 +319,30 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 		})
 	}
 
+	// Inject mail provider config so agent-side gc mail works in-cluster.
+	// GC_MAIL must point to the exec provider; GC_MCP_MAIL_URL uses the
+	// in-cluster service DNS so it works without external access.
+	if !envMap["GC_MAIL"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_MAIL", Value: "exec:gc-mail-mcp-agent-mail",
+		})
+	}
+	if !envMap["GC_MCP_MAIL_URL"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_MCP_MAIL_URL", Value: "http://mcp-mail.gc.svc.cluster.local:8765",
+		})
+	}
+	// GC_MCP_MAIL_PROJECT must match the controller-side project key so that
+	// host-sent mail and in-pod mail checks use the same mcp-mail project.
+	// Use GC_CITY_PATH which is the same absolute path in both environments.
+	if !envMap["GC_MCP_MAIL_PROJECT"] {
+		if cityPath := cfgEnv["GC_CITY_PATH"]; cityPath != "" {
+			env = append(env, corev1.EnvVar{
+				Name: "GC_MCP_MAIL_PROJECT", Value: cityPath,
+			})
+		}
+	}
+
 	// Inject GITHUB_TOKEN from optional K8s secret for git push in pods.
 	env = append(env, corev1.EnvVar{
 		Name: "GITHUB_TOKEN",
