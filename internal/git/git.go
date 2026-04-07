@@ -167,6 +167,16 @@ func (g *Git) StashPop() error {
 	return nil
 }
 
+// RemoteURL returns the URL of the named remote (e.g., "origin").
+// Returns an empty string and no error if the remote is not configured.
+func (g *Git) RemoteURL(remote string) (string, error) {
+	out, err := g.run("remote", "get-url", remote)
+	if err != nil {
+		return "", nil // remote not configured — not an error
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // PullRebase runs git pull --rebase from the specified remote and branch.
 func (g *Git) PullRebase(remote, branch string) error {
 	_, err := g.run("pull", "--rebase", remote, branch)
