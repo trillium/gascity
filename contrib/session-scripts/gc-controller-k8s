@@ -10,6 +10,7 @@
 #   stop                — Delete controller pod (graceful shutdown)
 #   status              — Show pod phase and age
 #   logs [--follow]     — Tail controller output
+#   rotate-creds        — Read fresh credentials from mayor pod; patch secret
 #
 # Configuration via environment variables:
 #   GC_K8S_NAMESPACE          — K8s namespace (default: gc)
@@ -31,7 +32,7 @@
 
 set -euo pipefail
 
-op="${1:?Usage: gc-controller-k8s <deploy|stop|status|logs> [args...]}"
+op="${1:?Usage: gc-controller-k8s <deploy|stop|status|logs|rotate-creds> [args...]}"
 shift || true
 
 # --- Configuration ---
@@ -393,8 +394,67 @@ case "$op" in
     "${KUBECTL[@]}" logs "$POD_NAME" $follow_flag
     ;;
 
+  rotate-creds)
+    # Read .credentials.json from the running mayor pod and patch the
+    # claude-credentials secret. Claude refreshes its OAuth token internally
+    # while running; the k8s secret is never updated automatically. New pods
+    # started after the original token expires get 401s immediately.
+    #
+    # Safe to run repeatedly — skips the patch when the token hasn't changed.
+    # Intended for cron use; run at least once after mayor has been up >1min.
+
+    # Find the running mayor pod by gc-agent label; fall back to any gc-agent pod.
+    pod=$("${KUBECTL[@]}" get pods \
+      -l gc-agent=mayor --field-selector=status.phase=Running \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$pod" ]; then
+      pod=$("${KUBECTL[@]}" get pods \
+        -l app=gc-agent --field-selector=status.phase=Running \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    fi
+    if [ -z "$pod" ]; then
+      echo "rotate-creds: no running gc-agent pod found" >&2
+      exit 1
+    fi
+    echo "rotate-creds: reading credentials from pod $pod"
+
+    # Claude writes refreshed tokens to $HOME/.claude/.credentials.json.
+    # Try root's home first (no LINUX_USERNAME), then any user home under /home.
+    creds=$("${KUBECTL[@]}" exec "$pod" -- sh -c \
+      'f=$(ls /root/.claude/.credentials.json /home/*/.claude/.credentials.json 2>/dev/null | head -1); [ -n "$f" ] && cat "$f"' \
+      2>/dev/null || true)
+    if [ -z "$creds" ]; then
+      echo "rotate-creds: could not read .credentials.json from pod $pod" >&2
+      exit 1
+    fi
+
+    # Sanity-check the JSON shape before patching.
+    if ! echo "$creds" | jq -e '.claudeAiOauth' >/dev/null 2>&1; then
+      echo "rotate-creds: unexpected credentials format in pod $pod" >&2
+      exit 1
+    fi
+
+    # Compare access token — skip patch if already in sync.
+    pod_token=$(echo "$creds" | jq -r '.claudeAiOauth.accessToken // ""')
+    k8s_token=$("${KUBECTL[@]}" get secret claude-credentials \
+      -o jsonpath='{.data.\.credentials\.json}' 2>/dev/null \
+      | base64 -d 2>/dev/null \
+      | jq -r '.claudeAiOauth.accessToken // ""' 2>/dev/null) || k8s_token=""
+
+    if [ "$pod_token" = "$k8s_token" ] && [ -n "$pod_token" ]; then
+      echo "rotate-creds: credentials already up to date"
+      exit 0
+    fi
+
+    # Patch only the .credentials.json key; leave other secret keys intact.
+    creds_b64=$(printf '%s' "$creds" | base64 | tr -d '\n')
+    "${KUBECTL[@]}" patch secret claude-credentials \
+      -p "{\"data\":{\".credentials.json\":\"${creds_b64}\"}}" >/dev/null
+    echo "rotate-creds: claude-credentials secret updated from pod $pod"
+    ;;
+
   *)
-    echo "Usage: gc-controller-k8s <deploy|stop|status|logs> [args...]" >&2
+    echo "Usage: gc-controller-k8s <deploy|stop|status|logs|rotate-creds> [args...]" >&2
     exit 1
     ;;
 esac
