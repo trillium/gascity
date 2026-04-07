@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/gastownhall/gascity/internal/git"
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
@@ -98,6 +100,32 @@ func newProviderWithOps(ops k8sOps) *Provider {
 	}
 }
 
+// pullPolicy returns the image pull policy for the agent container.
+// When the image has no registry prefix (e.g. "gc-agent:latest"), it is
+// assumed to be a locally-built image and IfNotPresent is used to avoid
+// failing on registries that don't host it. When prebaked, always use
+// IfNotPresent. Otherwise fall back to Always for fully-qualified images.
+func (p *Provider) pullPolicy() corev1.PullPolicy {
+	if p.prebaked {
+		return corev1.PullIfNotPresent
+	}
+	// Use IfNotPresent for images without a registry prefix (local builds).
+	// A registry prefix contains a dot or colon before the first slash.
+	img := p.image
+	slash := strings.Index(img, "/")
+	if slash < 0 {
+		// No slash: bare name like "gc-agent:latest" — local image.
+		return corev1.PullIfNotPresent
+	}
+	prefix := img[:slash]
+	if strings.ContainsAny(prefix, ".:") {
+		// Has registry host: myregistry.io/image or localhost:5000/image
+		return corev1.PullAlways
+	}
+	// No registry host: user/image style — treat as local or Docker Hub user image.
+	return corev1.PullIfNotPresent
+}
+
 // Start creates a new K8s pod running a tmux session with the agent command.
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	if p.image == "" {
@@ -128,6 +156,27 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 		// Clean up existing pod.
 		_ = p.ops.deletePod(ctx, pod.Name, 5)
 		_ = waitForDeletion(ctx, p.ops, pod.Name, 30*time.Second)
+	}
+
+	// Inject rig-related pod-side paths before building the pod manifest.
+	// GC_RIG_ROOT holds the controller-side local rig path; pods need a
+	// pod-side clone path.  Compute it here and store in GC_POD_RIG_ROOT so
+	// buildPod can remap pre_start commands.  Also detect the git remote so
+	// the init sequence can clone it at pod startup.
+	ctrlRigRoot := cfg.Env["GC_RIG_ROOT"]
+	if ctrlRigRoot != "" && !p.prebaked {
+		podRigRoot := rigRootPodPath(ctrlRigRoot, cfg.Env["GC_CITY"])
+		// Clone cfg.Env to avoid mutating the caller's map.
+		envCopy := make(map[string]string, len(cfg.Env))
+		for k, v := range cfg.Env {
+			envCopy[k] = v
+		}
+		envCopy["GC_POD_RIG_ROOT"] = podRigRoot
+		// Auto-detect git remote from the controller-side rig path.
+		if remote, err2 := git.New(ctrlRigRoot).RemoteURL("origin"); err2 == nil && remote != "" {
+			envCopy["GC_RIG_REMOTE"] = remote
+		}
+		cfg.Env = envCopy
 	}
 
 	// Build and create pod.
@@ -172,6 +221,18 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 		if ctrlCity != "" {
 			if err := initCityInPod(ctx, p.ops, podName, ctrlCity); err != nil {
 				fmt.Fprintf(p.stderr, "gc: warning: initCityInPod for %s: %v\n", podName, err) //nolint:errcheck
+			}
+		}
+
+		// Clone the rig repo inside the pod when a remote URL is available.
+		// Uses GITHUB_TOKEN (already injected as env var) for authentication.
+		if rigRemote := cfg.Env["GC_RIG_REMOTE"]; rigRemote != "" {
+			podRigRoot := cfg.Env["GC_POD_RIG_ROOT"]
+			if podRigRoot == "" {
+				podRigRoot = "/workspace/" + filepath.Base(cfg.Env["GC_RIG_ROOT"])
+			}
+			if err := cloneRigInPod(ctx, p.ops, podName, rigRemote, podRigRoot); err != nil {
+				fmt.Fprintf(p.stderr, "gc: warning: cloneRigInPod for %s: %v\n", podName, err) //nolint:errcheck
 			}
 		}
 
@@ -677,6 +738,63 @@ func initCityInPod(ctx context.Context, ops k8sOps, podName, ctrlCity string) er
 		[]string{"rm", "-rf", "/tmp/city-src"}, nil)
 	return nil
 }
+
+// cloneRigInPod clones the rig repository into the pod at destPath.
+// Authentication uses the GITHUB_TOKEN env var already present in the pod
+// (injected from the git-credentials secret).  The remote URL is rewritten to
+// embed the token so git can authenticate without a credential helper.
+// If destPath already exists (idempotent call), the clone is skipped.
+func cloneRigInPod(ctx context.Context, ops k8sOps, podName, remoteURL, destPath string) error {
+	// Skip if already present (e.g. called twice or from a pre-existing pod).
+	checkScript := fmt.Sprintf("[ -d %q/.git ] || [ -f %q/.git ]", destPath, destPath)
+	if out, err := ops.execInPod(ctx, podName, "agent", []string{"sh", "-c", checkScript}, nil); err == nil && strings.TrimSpace(out) == "" {
+		return nil // already cloned
+	}
+
+	// Clone the rig repo.  If GITHUB_TOKEN is set in the pod, inject it
+	// into the remote URL as https://<token>@github.com/...  The token value
+	// is read from the shell environment at clone time; the URL in the pod
+	// spec only contains the base HTTPS URL without credentials.
+	//
+	// remoteURL and destPath are controlled by the controller (not user input
+	// in the security-relevant sense) but are shell-escaped defensively.
+	remoteB64 := base64.StdEncoding.EncodeToString([]byte(remoteURL))
+	destB64 := base64.StdEncoding.EncodeToString([]byte(destPath))
+	cloneScript := fmt.Sprintf(
+		`DEST=$(echo '%s' | base64 -d); `+
+			`REMOTE=$(echo '%s' | base64 -d); `+
+			`[ -d "$DEST/.git" ] || [ -f "$DEST/.git" ] && exit 0; `+
+			`if [ -n "${GITHUB_TOKEN:-}" ] && `+
+			`echo "$REMOTE" | grep -q '^https://github.com'; then `+
+			`REMOTE="https://${GITHUB_TOKEN}@${REMOTE#https://}"; `+
+			`fi; `+
+			`git clone --depth 1 "$REMOTE" "$DEST"`,
+		destB64, remoteB64,
+	)
+	_, err := ops.execInPod(ctx, podName, "agent",
+		[]string{"sh", "-c", cloneScript}, nil)
+	return err
+}
+
+// rigRootPodPath computes the pod-side path for a rig repo.
+// If the rig root is the city itself or a subdirectory of it, the
+// pod-side path mirrors /workspace.  Otherwise, the rig is cloned
+// under /workspace/<basename>.
+func rigRootPodPath(ctrlRigRoot, ctrlCity string) string {
+	if ctrlRigRoot == "" {
+		return ""
+	}
+	if ctrlCity != "" {
+		if ctrlRigRoot == ctrlCity {
+			return "/workspace"
+		}
+		if rel, ok := strings.CutPrefix(ctrlRigRoot, ctrlCity+"/"); ok {
+			return "/workspace/" + rel
+		}
+	}
+	return "/workspace/" + filepath.Base(ctrlRigRoot)
+}
+
 
 // initBeadsInPod runs bd init --server inside the pod when Dolt env vars are
 // present. This eliminates the need for every agent script to include bd init

@@ -47,6 +47,12 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	}
 	cmdB64 := base64.StdEncoding.EncodeToString([]byte(agentCmd))
 
+	// Resolve pod-side rig root path for pre_start remapping.
+	// The controller sets GC_RIG_ROOT to a local filesystem path; pods use
+	// /workspace/<rig-name> (or /workspace if rig == city).
+	ctrlRigRoot := cfg.Env["GC_RIG_ROOT"]
+	podRigRoot := cfg.Env["GC_POD_RIG_ROOT"] // set by provider.Start after remote detection
+
 	// Pod entrypoint: wait for workspace ready → pre_start → tmux → keepalive.
 	// Each pre_start command is base64-encoded and decoded at runtime to prevent
 	// shell metacharacter injection from user-supplied commands.
@@ -55,6 +61,10 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		c := cmd
 		if ctrlCity != "" {
 			c = strings.ReplaceAll(c, ctrlCity, "/workspace")
+		}
+		// Remap rig root path when it differs from the city path.
+		if ctrlRigRoot != "" && ctrlRigRoot != ctrlCity && podRigRoot != "" {
+			c = strings.ReplaceAll(c, ctrlRigRoot, podRigRoot)
 		}
 		b64 := base64.StdEncoding.EncodeToString([]byte(c))
 		preStartCmds += fmt.Sprintf("echo '%s' | base64 -d | sh; ", b64)
@@ -163,7 +173,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			Containers: []corev1.Container{{
 				Name:            "agent",
 				Image:           p.image,
-				ImagePullPolicy: corev1.PullAlways,
+				ImagePullPolicy: p.pullPolicy(),
 				WorkingDir:      podWorkDir,
 				Command:         []string{"/bin/sh", "-c"},
 				Args:            []string{tmuxCmd},
@@ -239,12 +249,34 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir string) []corev1.EnvVar {
 			continue
 		}
 		val := v
-		// Remap GC_CITY and GC_DIR to pod paths.
+		// Remap GC_CITY, GC_DIR, and GC_RIG_ROOT to pod paths.
 		switch k {
 		case "GC_CITY":
 			val = "/workspace"
 		case "GC_DIR":
 			val = podWorkDir
+		case "GC_RIG_ROOT":
+			if val != "" {
+				// If rig root is under the city dir, preserve the relative suffix.
+				// Otherwise, map to /workspace/<basename-of-rig-root>.
+				ctrlCityForRig := cfgEnv["GC_CITY"]
+				if ctrlCityForRig != "" {
+					if rel, ok := strings.CutPrefix(val, ctrlCityForRig+"/"); ok {
+						val = "/workspace/" + rel
+						break
+					}
+					if val == ctrlCityForRig {
+						val = "/workspace"
+						break
+					}
+				}
+				// Different root — use basename under /workspace.
+				if i := strings.LastIndex(val, "/"); i >= 0 {
+					val = "/workspace/" + val[i+1:]
+				} else {
+					val = "/workspace/" + val
+				}
+			}
 		}
 		env = append(env, corev1.EnvVar{Name: k, Value: val})
 	}
