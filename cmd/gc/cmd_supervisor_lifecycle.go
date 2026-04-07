@@ -319,6 +319,8 @@ type supervisorServiceData struct {
 	GCK8sImage     string
 	GCK8sNamespace string
 	GCK8sContext   string
+	GCMail         string
+	GCMcpMailURL   string
 }
 
 func buildSupervisorServiceData() (*supervisorServiceData, error) {
@@ -342,6 +344,8 @@ func buildSupervisorServiceData() (*supervisorServiceData, error) {
 		GCK8sImage:     os.Getenv("GC_K8S_IMAGE"),
 		GCK8sNamespace: os.Getenv("GC_K8S_NAMESPACE"),
 		GCK8sContext:   os.Getenv("GC_K8S_CONTEXT"),
+		GCMail:         os.Getenv("GC_MAIL"),
+		GCMcpMailURL:   os.Getenv("GC_MCP_MAIL_URL"),
 	}, nil
 }
 
@@ -392,7 +396,11 @@ const supervisorLaunchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
         <key>GC_K8S_NAMESPACE</key>
         <string>{{xmlesc .GCK8sNamespace}}</string>{{end}}{{if .GCK8sContext}}
         <key>GC_K8S_CONTEXT</key>
-        <string>{{xmlesc .GCK8sContext}}</string>{{end}}
+        <string>{{xmlesc .GCK8sContext}}</string>{{end}}{{if .GCMail}}
+        <key>GC_MAIL</key>
+        <string>{{xmlesc .GCMail}}</string>{{end}}{{if .GCMcpMailURL}}
+        <key>GC_MCP_MAIL_URL</key>
+        <string>{{xmlesc .GCMcpMailURL}}</string>{{end}}
     </dict>
 </dict>
 </plist>
@@ -413,7 +421,9 @@ Environment=GC_HOME="{{.GCHome}}"
 {{end}}Environment=PATH="{{.Path}}"{{if .GCK8sImage}}
 Environment=GC_K8S_IMAGE="{{.GCK8sImage}}"{{end}}{{if .GCK8sNamespace}}
 Environment=GC_K8S_NAMESPACE="{{.GCK8sNamespace}}"{{end}}{{if .GCK8sContext}}
-Environment=GC_K8S_CONTEXT="{{.GCK8sContext}}"{{end}}
+Environment=GC_K8S_CONTEXT="{{.GCK8sContext}}"{{end}}{{if .GCMail}}
+Environment=GC_MAIL="{{.GCMail}}"{{end}}{{if .GCMcpMailURL}}
+Environment=GC_MCP_MAIL_URL="{{.GCMcpMailURL}}"{{end}}
 
 [Install]
 WantedBy=default.target

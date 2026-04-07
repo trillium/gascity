@@ -396,6 +396,49 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		env = append(env, corev1.EnvVar{Name: "CLAUDE_CONFIG_DIR", Value: "/home/gcagent/.claude"})
 	}
 
+	// Inject K8s Dolt discovery for agent-side bd init.
+	// GC_DOLT_HOST/PORT are stripped (controller-only), so inject K8s-specific
+	// defaults that point to the in-cluster Dolt service.
+	envMap := make(map[string]bool, len(env))
+	for _, e := range env {
+		envMap[e.Name] = true
+	}
+	if !envMap["GC_K8S_DOLT_HOST"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_K8S_DOLT_HOST", Value: "dolt.gc.svc.cluster.local",
+		})
+	}
+	if !envMap["GC_K8S_DOLT_PORT"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_K8S_DOLT_PORT", Value: "3307",
+		})
+	}
+
+	// Inject mail provider config so agent-side gc mail works in-cluster.
+	// GC_MAIL must point to the exec provider; GC_MCP_MAIL_URL uses the
+	// in-cluster service DNS so it works without external access.
+	if !envMap["GC_MAIL"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_MAIL", Value: "exec:gc-mail-mcp-agent-mail",
+		})
+	}
+	if !envMap["GC_MCP_MAIL_URL"] {
+		env = append(env, corev1.EnvVar{
+			Name: "GC_MCP_MAIL_URL", Value: "http://mcp-mail.gc.svc.cluster.local:8765",
+		})
+	}
+	// GC_MCP_MAIL_PROJECT must match the controller-side project key so that
+	// host-sent mail and in-pod mail checks use the same mcp-mail project.
+	// Use GC_CITY_PATH which is the same absolute path in both environments.
+	if !envMap["GC_MCP_MAIL_PROJECT"] {
+		if cityPath := cfgEnv["GC_CITY_PATH"]; cityPath != "" {
+			env = append(env, corev1.EnvVar{
+				Name: "GC_MCP_MAIL_PROJECT", Value: cityPath,
+			})
+		}
+	}
+
+
 	// Inject GITHUB_TOKEN from optional K8s secret for git push in pods.
 	env = append(env, corev1.EnvVar{
 		Name: "GITHUB_TOKEN",
