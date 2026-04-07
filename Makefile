@@ -255,6 +255,13 @@ k8s-secret:
 	kubectl -n "$$ns" create secret generic claude-credentials $$args; \
 	echo "Secret 'claude-credentials' created in namespace '$$ns'"
 
+## k8s-rotate-credentials: pull fresh Claude credentials from mayor pod and patch secret
+## Usage: make k8s-rotate-credentials [GC_K8S_NAMESPACE=gc] [GC_K8S_CONTEXT=orbstack]
+k8s-rotate-credentials:
+	@GC_K8S_NAMESPACE="$${GC_K8S_NAMESPACE:-gc}" \
+	GC_K8S_CONTEXT="$${GC_K8S_CONTEXT:-}" \
+	contrib/session-scripts/gc-controller-k8s rotate-creds
+
 ## help: show this help
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //' | column -t -s ':'
