@@ -258,11 +258,14 @@ func supervisorLogPath() string {
 }
 
 type supervisorServiceData struct {
-	GCPath   string
-	LogPath  string
-	GCHome   string
-	SafeName string
-	Path     string
+	GCPath          string
+	LogPath         string
+	GCHome          string
+	SafeName        string
+	Path            string
+	GCK8sImage      string
+	GCK8sNamespace  string
+	GCK8sContext    string
 }
 
 func buildSupervisorServiceData() (*supervisorServiceData, error) {
@@ -272,11 +275,14 @@ func buildSupervisorServiceData() (*supervisorServiceData, error) {
 	}
 	home := supervisor.DefaultHome()
 	return &supervisorServiceData{
-		GCPath:   gcPath,
-		LogPath:  supervisorLogPath(),
-		GCHome:   home,
-		SafeName: sanitizeServiceName(filepath.Base(home)),
-		Path:     os.Getenv("PATH"),
+		GCPath:         gcPath,
+		LogPath:        supervisorLogPath(),
+		GCHome:         home,
+		SafeName:       sanitizeServiceName(filepath.Base(home)),
+		Path:           os.Getenv("PATH"),
+		GCK8sImage:     os.Getenv("GC_K8S_IMAGE"),
+		GCK8sNamespace: os.Getenv("GC_K8S_NAMESPACE"),
+		GCK8sContext:   os.Getenv("GC_K8S_CONTEXT"),
 	}, nil
 }
 
@@ -317,7 +323,13 @@ const supervisorLaunchdTemplate = `<?xml version="1.0" encoding="UTF-8"?>
         <key>GC_HOME</key>
         <string>{{xmlesc .GCHome}}</string>
         <key>PATH</key>
-        <string>{{xmlesc .Path}}</string>
+        <string>{{xmlesc .Path}}</string>{{if .GCK8sImage}}
+        <key>GC_K8S_IMAGE</key>
+        <string>{{xmlesc .GCK8sImage}}</string>{{end}}{{if .GCK8sNamespace}}
+        <key>GC_K8S_NAMESPACE</key>
+        <string>{{xmlesc .GCK8sNamespace}}</string>{{end}}{{if .GCK8sContext}}
+        <key>GC_K8S_CONTEXT</key>
+        <string>{{xmlesc .GCK8sContext}}</string>{{end}}
     </dict>
 </dict>
 </plist>
@@ -334,7 +346,10 @@ RestartSec=5s
 StandardOutput=append:{{.LogPath}}
 StandardError=append:{{.LogPath}}
 Environment=GC_HOME="{{.GCHome}}"
-Environment=PATH="{{.Path}}"
+Environment=PATH="{{.Path}}"{{if .GCK8sImage}}
+Environment=GC_K8S_IMAGE="{{.GCK8sImage}}"{{end}}{{if .GCK8sNamespace}}
+Environment=GC_K8S_NAMESPACE="{{.GCK8sNamespace}}"{{end}}{{if .GCK8sContext}}
+Environment=GC_K8S_CONTEXT="{{.GCK8sContext}}"{{end}}
 
 [Install]
 WantedBy=default.target
