@@ -179,7 +179,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			linuxUsername,
 		)
 	}
-	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; `
+	credCopy := `mkdir -p ${CLAUDE_CONFIG_DIR:-$HOME/.claude} && cp -rL /tmp/claude-secret/. ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; `
 	wsWait := ""
 	if !p.prebaked {
 		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
@@ -336,6 +336,16 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		"GC_DOLT_PORT":           true,
 		"BEADS_DOLT_SERVER_HOST": true,
 		"BEADS_DOLT_SERVER_PORT": true,
+		// Strip controller-side HOME — it's the Mac user's home (e.g.
+		// /Users/trilliumsmith) which doesn't exist in pods. We set the
+		// correct pod-side HOME below based on linuxUser.
+		"HOME":            true,
+		"XDG_CONFIG_HOME": true,
+		// Note: GC_DOLT_USER, GC_DOLT_PASSWORD, BEADS_DOLT_SERVER_USER,
+		// and BEADS_DOLT_PASSWORD are intentionally NOT stripped — agents
+		// need auth credentials to authenticate against the in-cluster
+		// Dolt service. Only host/port are stripped and replaced with
+		// K8s-specific endpoints.
 	}
 
 	ctrlCity := controllerCityPath(cfgEnv)
@@ -374,12 +384,15 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 	// Add tmux session env so agent's tmux provider uses the same session.
 	env = append(env, corev1.EnvVar{Name: "GC_TMUX_SESSION", Value: tmuxSession})
 
-	// CLAUDE_CONFIG_DIR: use dynamic username home if LINUX_USERNAME is set,
-	// otherwise fall back to the baked-in gcagent user.
+	// HOME and CLAUDE_CONFIG_DIR: use dynamic username home if LINUX_USERNAME
+	// is set, otherwise fall back to the baked-in gcagent user.
+	// HOME is stripped from cfgEnv above (it's the controller's Mac home path).
 	linuxUser := cfgEnv["LINUX_USERNAME"]
 	if linuxUser != "" {
+		env = append(env, corev1.EnvVar{Name: "HOME", Value: "/home/" + linuxUser})
 		env = append(env, corev1.EnvVar{Name: "CLAUDE_CONFIG_DIR", Value: "/home/" + linuxUser + "/.claude"})
 	} else {
+		env = append(env, corev1.EnvVar{Name: "HOME", Value: "/home/gcagent"})
 		env = append(env, corev1.EnvVar{Name: "CLAUDE_CONFIG_DIR", Value: "/home/gcagent/.claude"})
 	}
 
