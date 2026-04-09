@@ -355,7 +355,7 @@ spec-ci: install-oapi-codegen
 
 ## docker-base: build base image with system dependencies (~2.5 min, rebuild rarely)
 docker-base: check-docker
-	. ./deps.env && docker build -f contrib/k8s/Dockerfile.base \
+	. $(CURDIR)/deps.env && docker build -f contrib/k8s/Dockerfile.base \
 		--build-arg DOLT_VERSION=$$DOLT_VERSION \
 		-t gc-agent-base:latest .
 
