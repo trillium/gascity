@@ -19,9 +19,13 @@ func currentSessionRuntimeTarget() (sessionRuntimeTarget, error) {
 	if display == "human" {
 		return sessionRuntimeTarget{}, fmt.Errorf("not in session context (GC_ALIAS/GC_SESSION_ID not set)")
 	}
-	sessionName := strings.TrimSpace(os.Getenv("GC_TMUX_SESSION"))
+	// GC_SESSION_NAME is the gas city session name (e.g. polecat-ct-s1dpu).
+	// GC_TMUX_SESSION is "main" in k8s pods (fixed tmux session name inside the container).
+	// Prefer GC_SESSION_NAME so in-pod commands (drain-ack, handoff, etc.) use the
+	// k8s session name that the controller recognises, not the pod-internal tmux name.
+	sessionName := strings.TrimSpace(os.Getenv("GC_SESSION_NAME"))
 	if sessionName == "" {
-		sessionName = strings.TrimSpace(os.Getenv("GC_SESSION_NAME"))
+		sessionName = strings.TrimSpace(os.Getenv("GC_TMUX_SESSION"))
 	}
 	if sessionName == "" {
 		return sessionRuntimeTarget{}, fmt.Errorf("not in session context (GC_SESSION_NAME not set)")

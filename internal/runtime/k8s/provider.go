@@ -419,6 +419,14 @@ func (p *Provider) RunLive(_ string, _ runtime.Config) error {
 
 // SetMeta stores a key-value pair in the tmux environment.
 func (p *Provider) SetMeta(name, key, value string) error {
+	// In-pod shortcut: when running inside a k8s pod, use local tmux directly.
+	// The agent pod's service account lacks pods/list and pods/exec, so the
+	// k8s API path would silently no-op. The pod IS the tmux host, so direct
+	// tmux works. The controller reads back via kubectl exec (it has full RBAC).
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		_ = exec.Command("tmux", "set-environment", "-t", tmuxSession, key, value).Run()
+		return nil
+	}
 	ctx := context.Background()
 	podName, err := p.findPod(ctx, name)
 	if err != nil {
@@ -431,6 +439,21 @@ func (p *Provider) SetMeta(name, key, value string) error {
 
 // GetMeta retrieves a metadata value from the tmux environment.
 func (p *Provider) GetMeta(name, key string) (string, error) {
+	// In-pod shortcut: read directly from the local tmux session.
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		out, err := exec.Command("tmux", "show-environment", "-t", tmuxSession, key).Output()
+		if err != nil {
+			return "", nil
+		}
+		s := strings.TrimSpace(string(out))
+		if strings.HasPrefix(s, "-") {
+			return "", nil // explicitly unset
+		}
+		if _, val, ok := strings.Cut(s, "="); ok {
+			return val, nil
+		}
+		return "", nil
+	}
 	ctx := context.Background()
 	podName, err := p.findPod(ctx, name)
 	if err != nil {
@@ -454,6 +477,11 @@ func (p *Provider) GetMeta(name, key string) (string, error) {
 
 // RemoveMeta removes a metadata key from the tmux environment.
 func (p *Provider) RemoveMeta(name, key string) error {
+	// In-pod shortcut: use local tmux directly.
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		_ = exec.Command("tmux", "set-environment", "-t", tmuxSession, "-u", key).Run()
+		return nil
+	}
 	ctx := context.Background()
 	podName, err := p.findPod(ctx, name)
 	if err != nil {
