@@ -129,7 +129,8 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 	existing, err := p.ops.listPods(ctx, "gc-session="+label, "")
 	if err == nil && len(existing) > 0 {
 		pod := &existing[0]
-		if pod.Status.Phase == corev1.PodRunning {
+		switch pod.Status.Phase {
+		case corev1.PodRunning:
 			// Check if tmux is alive — stale pod detection.
 			_, tmuxErr := p.ops.execInPod(ctx, pod.Name, "agent",
 				[]string{"tmux", "has-session", "-t", tmuxSession}, nil)
@@ -143,6 +144,14 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 				return fmt.Errorf("%w: session %q (pod: %s)", runtime.ErrSessionInitializing, name, pod.Name)
 			}
 			// Stale pod — tmux dead and past grace period, recreate.
+		case corev1.PodPending:
+			// Pod is still being scheduled or pulling its image. Don't delete
+			// it — that creates a delete/recreate loop on every reconcile tick.
+			// Return ErrSessionInitializing so the reconciler backs off.
+			if time.Since(pod.CreationTimestamp.Time) < startupGracePeriod {
+				return fmt.Errorf("%w: session %q (pod: %s, phase: Pending)", runtime.ErrSessionInitializing, name, pod.Name)
+			}
+			// Pending too long — stale, fall through to clean up and recreate.
 		}
 		// Clean up existing pod.
 		_ = p.ops.deletePod(ctx, pod.Name, 5)
