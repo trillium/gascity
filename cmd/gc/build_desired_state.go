@@ -183,7 +183,7 @@ func buildDesiredStateWithSessionBeads(
 		// Agents that back configured named sessions are materialized by the
 		// named-session pass below so on-demand/always semantics stay centralized.
 		if _, ok := findNamedSessionSpec(cfg, cityName, cfg.Agents[i].QualifiedName()); ok {
-			if cfg.Agents[i].ScaleCheck != "" {
+			if cfg.Agents[i].ScaleCheck != "" && !agentInSuspendedRig(cityPath, &cfg.Agents[i], cfg.Rigs, suspendedRigPaths) {
 				sp := scaleParamsFor(&cfg.Agents[i])
 				poolDir := agentCommandDir(cityPath, &cfg.Agents[i], cfg.Rigs)
 				namedSessionScaleChecks = append(namedSessionScaleChecks, poolEvalWork{agentIdx: i, sp: sp, poolDir: poolDir})

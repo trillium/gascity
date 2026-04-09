@@ -1171,6 +1171,11 @@ func TestBuildDesiredState_NamedSessionScaleCheckZeroNoDemand(t *testing.T) {
 	if dsResult.NamedSessionDemand["dog"] {
 		t.Fatal("NamedSessionDemand[dog] = true, want false when scale_check returns 0")
 	}
+	for _, tp := range dsResult.State {
+		if tp.TemplateName == "dog" {
+			t.Fatalf("dog session materialized with scale_check=0, should be absent")
+		}
+	}
 }
 
 // PR #216 — skipped for now. Cross-rig pool work visibility is a new
