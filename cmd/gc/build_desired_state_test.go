@@ -1091,6 +1091,88 @@ func TestSelectOrCreatePoolSessionBead_SkipsAsleepButReusesActive(t *testing.T) 
 	}
 }
 
+// TestBuildDesiredState_NamedSessionScaleCheckDemand verifies that a
+// named_session agent with a custom scale_check has that check evaluated
+// and used as a demand signal for on_demand materialization. Regression
+// test for #508 where the named-session code path skipped scale_check
+// entirely.
+func TestBuildDesiredState_NamedSessionScaleCheckDemand(t *testing.T) {
+	cityPath := t.TempDir()
+	store := beads.NewMemStore()
+
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{{
+			Name:              "dog",
+			StartCommand:      "true",
+			MinActiveSessions: intPtr(0),
+			MaxActiveSessions: intPtr(3),
+			ScaleCheck:        "echo 5", // simulates 5 queued molecules
+		}},
+		NamedSessions: []config.NamedSession{{
+			Template: "dog",
+			Mode:     "on_demand",
+		}},
+	}
+
+	dsResult := buildDesiredState("test-city", cityPath, time.Now().UTC(), cfg, runtime.NewFake(), store, io.Discard)
+
+	// The scale_check should have been evaluated.
+	if dsResult.ScaleCheckCounts == nil {
+		t.Fatal("ScaleCheckCounts is nil, want scale_check to be evaluated for named-session agent")
+	}
+	// scale_check output (5) is clamped to max_active_sessions (3).
+	if got := dsResult.ScaleCheckCounts["dog"]; got != 3 {
+		t.Fatalf("ScaleCheckCounts[dog] = %d, want 3 (clamped from echo 5)", got)
+	}
+
+	// The on_demand named session should have been materialized via
+	// scale_check demand.
+	if !dsResult.NamedSessionDemand["dog"] {
+		t.Fatal("NamedSessionDemand[dog] = false, want true when scale_check returns > 0")
+	}
+
+	// Verify a session was actually desired.
+	found := false
+	for _, tp := range dsResult.State {
+		if tp.TemplateName == "dog" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no desired session for dog template, want one from scale_check demand")
+	}
+}
+
+// TestBuildDesiredState_NamedSessionScaleCheckZeroNoDemand verifies that a
+// named_session agent with scale_check returning 0 does NOT get demand.
+func TestBuildDesiredState_NamedSessionScaleCheckZeroNoDemand(t *testing.T) {
+	cityPath := t.TempDir()
+	store := beads.NewMemStore()
+
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{{
+			Name:              "dog",
+			StartCommand:      "true",
+			MinActiveSessions: intPtr(0),
+			MaxActiveSessions: intPtr(3),
+			ScaleCheck:        "echo 0",
+		}},
+		NamedSessions: []config.NamedSession{{
+			Template: "dog",
+			Mode:     "on_demand",
+		}},
+	}
+
+	dsResult := buildDesiredState("test-city", cityPath, time.Now().UTC(), cfg, runtime.NewFake(), store, io.Discard)
+
+	if dsResult.NamedSessionDemand["dog"] {
+		t.Fatal("NamedSessionDemand[dog] = true, want false when scale_check returns 0")
+	}
+}
+
 // PR #216 — skipped for now. Cross-rig pool work visibility is a new
 // feature, not a bug fix. Left as open PR for discussion about the
 // gastown experience with this flow.

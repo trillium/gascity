@@ -171,9 +171,26 @@ func buildDesiredStateWithSessionBeads(
 
 	desired := make(map[string]TemplateParams)
 	var pendingPools []poolEvalWork
+	// namedSessionScaleChecks collects scale_check evaluations for agents
+	// that back named sessions. These agents are materialized by the
+	// named-session pass (not the pool path), but their scale_check must
+	// still be evaluated so on_demand sessions detect work.
+	var namedSessionScaleChecks []poolEvalWork
 
 	for i := range cfg.Agents {
 		if cfg.Agents[i].Suspended {
+			continue
+		}
+		// Agents that back configured named sessions are materialized by the
+		// named-session pass below so on-demand/always semantics stay centralized.
+		// However, we still evaluate their scale_check so that on_demand named
+		// sessions can use it as a demand signal.
+		if _, ok := findNamedSessionSpec(cfg, cityName, cfg.Agents[i].QualifiedName()); ok {
+			sp := scaleParamsFor(&cfg.Agents[i])
+			if sp.Check != "" {
+				poolDir := agentCommandDir(cityPath, &cfg.Agents[i], cfg.Rigs)
+				namedSessionScaleChecks = append(namedSessionScaleChecks, poolEvalWork{agentIdx: i, sp: sp, poolDir: poolDir})
+			}
 			continue
 		}
 
@@ -214,7 +231,10 @@ func buildDesiredStateWithSessionBeads(
 
 	// scale_check runs in parallel for all pool agents — the authoritative
 	// demand signal for new sessions. Computed once, returned in result.
-	scaleCheckCounts := evaluatePendingPoolsMap(cityPath, cfg, pendingPools, stderr, trace)
+	// Named-session agents with custom scale_check are evaluated alongside
+	// pool agents so their results feed the named-session demand pass.
+	allScaleChecks := append(pendingPools, namedSessionScaleChecks...)
+	scaleCheckCounts := evaluatePendingPoolsMap(cityPath, cfg, allScaleChecks, stderr, trace)
 
 	// Collect work beads with assignees — used for both pool demand and
 	// named session on_demand wake. Hoisted out of the store block so
@@ -329,6 +349,19 @@ func buildDesiredStateWithSessionBeads(
 			continue
 		}
 		if workQueryHasReadyWork(strings.TrimSpace(out)) {
+			namedWorkReady[identity] = true
+		}
+	}
+	// scale_check demand: if a named-session agent's scale_check returned > 0,
+	// treat that as demand — the scale_check is the operator's explicit signal
+	// that work exists, independent of the work_query path.
+	for identity, spec := range namedSpecs {
+		if spec.Mode == "always" || namedWorkReady[identity] {
+			continue
+		}
+		template := spec.Agent.QualifiedName()
+		if count, ok := scaleCheckCounts[template]; ok && count > 0 {
+			fmt.Fprintf(stderr, "namedWorkReady: %s matched by scale_check (count=%d)\n", identity, count) //nolint:errcheck
 			namedWorkReady[identity] = true
 		}
 	}
