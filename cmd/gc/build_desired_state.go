@@ -242,6 +242,18 @@ func buildDesiredStateWithSessionBeads(
 	allScaleChecks = append(allScaleChecks, namedSessionScaleChecks...)
 	scaleCheckCounts := evaluatePendingPoolsMap(cityPath, cfg, allScaleChecks, stderr, trace)
 
+	// Derive a pool-only view for ComputePoolDesiredStatesTraced so that
+	// named-session counts are NOT interpreted as pool scaling demand
+	// (which would double-materialize: once via the pool path, once via
+	// the named-session pass below).
+	poolScaleCheckCounts := make(map[string]int, len(pendingPools))
+	for _, pw := range pendingPools {
+		template := cfg.Agents[pw.agentIdx].QualifiedName()
+		if count, ok := scaleCheckCounts[template]; ok {
+			poolScaleCheckCounts[template] = count
+		}
+	}
+
 	// Collect work beads with assignees — used for both pool demand and
 	// named session on_demand wake. Hoisted out of the store block so
 	// the named session section can also use it.
@@ -260,7 +272,7 @@ func buildDesiredStateWithSessionBeads(
 		} else {
 			fmt.Fprintf(stderr, "assignedWorkBeads: 0 beads (rigStores=%d)\n", len(rigStores)) //nolint:errcheck
 		}
-		poolDesiredStates := ComputePoolDesiredStatesTraced(cfg, assignedWorkBeads, sessionBeads.Open(), scaleCheckCounts, trace)
+		poolDesiredStates := ComputePoolDesiredStatesTraced(cfg, assignedWorkBeads, sessionBeads.Open(), poolScaleCheckCounts, trace)
 		for _, poolState := range poolDesiredStates {
 			cfgAgent := findAgentByTemplate(cfg, poolState.Template)
 			if cfgAgent == nil {

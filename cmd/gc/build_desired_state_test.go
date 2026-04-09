@@ -1132,16 +1132,23 @@ func TestBuildDesiredState_NamedSessionScaleCheckDemand(t *testing.T) {
 		t.Fatal("NamedSessionDemand[dog] = false, want true when scale_check returns > 0")
 	}
 
-	// Verify a session was actually desired.
-	found := false
+	// Verify exactly one session was desired for dog, and that it came
+	// from the named-session materialization path (ConfiguredNamedIdentity
+	// is set) — NOT from a pool-managed path that would double-materialize
+	// if scaleCheckCounts were passed unfiltered to ComputePoolDesiredStates.
+	dogCount := 0
+	var dogSession TemplateParams
 	for _, tp := range dsResult.State {
 		if tp.TemplateName == "dog" {
-			found = true
-			break
+			dogCount++
+			dogSession = tp
 		}
 	}
-	if !found {
-		t.Fatal("no desired session for dog template, want one from scale_check demand")
+	if dogCount != 1 {
+		t.Fatalf("desired dog sessions = %d, want exactly 1 named-session materialization", dogCount)
+	}
+	if dogSession.ConfiguredNamedIdentity != "dog" {
+		t.Fatalf("ConfiguredNamedIdentity = %q, want \"dog\" — session was not materialized via named-session path", dogSession.ConfiguredNamedIdentity)
 	}
 }
 
