@@ -1,0 +1,105 @@
+# Lima k3s server — run this on the control-plane node (Mini2).
+#
+# Sets up a k3s server with:
+#   - API port 6443 forwarded to the host's LAN interface (so agents can join)
+#   - TLS SANs for the server's LAN and Tailscale IPs
+#   - A plain registry:2 container on port 5100 for image distribution
+#
+# Usage:
+#   limactl start --name k3s-server \
+#     --set '.param.lanIP="<YOUR_LAN_IP>" | .param.tailscaleIP="<YOUR_TAILSCALE_IP>"' \
+#     contrib/k8s/lima/k3s-server.yaml
+#
+# After start:
+#   Get token:     limactl shell k3s-server -- sudo cat /var/lib/rancher/k3s/server/node-token
+#   Get kubeconfig: limactl list k3s-server --format '{{.Dir}}/copied-from-guest/kubeconfig.yaml'
+
+minimumLimaVersion: "2.0.0"
+
+base: "template:_images/ubuntu-lts"
+
+cpus: 4
+memory: "4GiB"
+disk: "40GiB"
+
+# Disable Lima's containerd — k3s manages its own.
+containerd:
+  system: false
+  user: false
+
+mounts: []
+
+# Forward k3s API and image registry ports to the host's LAN interface.
+portForwards:
+  - guestPort: 6443
+    hostPort: 6443
+    hostIP: "0.0.0.0"
+  - guestPort: 5100
+    hostPort: 5100
+    hostIP: "127.0.0.1"
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -e
+      # Install k3s server if not already installed.
+      if [ ! -d /var/lib/rancher/k3s ]; then
+        # --tls-san: add the server's LAN and Tailscale IPs so external kubeconfigs work.
+        curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
+          --write-kubeconfig-mode 644 \
+          --tls-san {{.Param.lanIP}} \
+          --tls-san {{.Param.tailscaleIP}}" sh -
+      fi
+
+      # Plain Docker registry for image distribution to worker nodes.
+      # Images built on the laptop are pushed here; k3s agents pull from it.
+      if ! command -v docker >/dev/null 2>&1; then
+        curl -fsSL https://get.docker.com | sh
+        systemctl enable --now docker
+        # Wait for Docker to be ready.
+        for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
+      fi
+      if ! docker ps 2>/dev/null | grep -q " registry$"; then
+        docker run -d --restart=always \
+          -p 127.0.0.1:5100:5000 \
+          --name registry \
+          registry:2 2>/dev/null || true
+      fi
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 90s bash -c "until test -f /etc/rancher/k3s/k3s.yaml; do sleep 3; done"; then
+        echo >&2 "k3s did not start in time"
+        exit 1
+      fi
+    hint: |
+      k3s not yet ready. Check:
+        limactl shell k3s-server -- sudo journalctl -u k3s -n 50
+
+param:
+  lanIP: ""        # e.g. 192.168.1.10 — server's LAN IP for TLS SAN and kubeconfig
+  tailscaleIP: "" # e.g. 100.x.y.z    — server's Tailscale IP for TLS SAN (omit if unused)
+
+copyToHost:
+  - guest: "/etc/rancher/k3s/k3s.yaml"
+    host: "{{.Dir}}/copied-from-guest/kubeconfig.yaml"
+    deleteOnStop: true
+
+message: |
+  k3s server is running on Mini2.
+
+  On Mini2, get the node token:
+    limactl shell k3s-server -- sudo cat /var/lib/rancher/k3s/server/node-token
+
+  On another node, start a worker:
+    limactl start --name k3s-agent \
+      --set '.param.url="https://<LAN_IP>:6443" | .param.serverIP="<LAN_IP>" | .param.token="<TOKEN>"' \
+      /path/to/k3s-agent.yaml
+
+  To use kubectl from a remote machine:
+    1. scp server:~/.lima/k3s-server/copied-from-guest/kubeconfig.yaml ~/.kube/k3s-server.yaml
+    2. sed -i '' 's|127.0.0.1|<LAN_IP>|g' ~/.kube/k3s-server.yaml
+    3. export KUBECONFIG=~/.kube/k3s-server.yaml

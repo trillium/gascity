@@ -1,0 +1,69 @@
+# Lima k3s agent — run this on worker nodes (laptop, Mini3, etc).
+#
+# Joins a k3s server. Configures containerd to pull images from the
+# registry on the server node (param.serverIP:5100).
+#
+# Usage:
+#   # Get token from server first:
+#   limactl shell k3s-server -- sudo cat /var/lib/rancher/k3s/server/node-token
+#
+#   limactl start --name k3s-agent \
+#     --set '.param.url="https://<SERVER_LAN_IP>:6443" | .param.serverIP="<SERVER_LAN_IP>" | .param.token="<TOKEN>"' \
+#     contrib/k8s/lima/k3s-agent.yaml
+
+minimumLimaVersion: "2.0.0"
+
+base: "template:_images/ubuntu-lts"
+
+cpus: 4
+memory: "6GiB"
+disk: "40GiB"
+
+# Disable Lima's containerd — k3s manages its own.
+containerd:
+  system: false
+  user: false
+
+mounts: []
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/sh
+      set -e
+
+      # Configure k3s containerd to pull from the server's registry before installing.
+      mkdir -p /etc/rancher/k3s
+      printf 'mirrors:\n  "{{.Param.serverIP}}:5100":\n    endpoint:\n      - "http://{{.Param.serverIP}}:5100"\n' \
+        > /etc/rancher/k3s/registries.yaml
+
+      # Install k3s agent if not already installed.
+      if [ ! -d /var/lib/rancher/k3s ]; then
+        curl -sfL https://get.k3s.io | \
+          K3S_URL="{{.Param.url}}" \
+          K3S_TOKEN="{{.Param.token}}" \
+          sh -
+      fi
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 90s bash -c "until systemctl is-active k3s-agent >/dev/null 2>&1; do sleep 3; done"; then
+        echo >&2 "k3s-agent did not start in time"
+        exit 1
+      fi
+    hint: |
+      k3s-agent not yet running. Check:
+        limactl shell k3s-agent -- sudo journalctl -u k3s-agent -n 50
+
+message: |
+  k3s agent joined the cluster.
+
+  Verify from the laptop (with KUBECONFIG pointing to Mini2):
+    kubectl get nodes
+
+param:
+  url: ""       # https://<SERVER_LAN_IP>:6443
+  token: ""     # from: limactl shell k3s-server -- sudo cat /var/lib/rancher/k3s/server/node-token
+  serverIP: ""  # server's LAN IP, used for the image registry mirror (serverIP:5100)

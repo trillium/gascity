@@ -3,9 +3,9 @@
 # Runs mcp_agent_mail as a single-replica HTTP service. Agents reach it
 # at http://mcp-mail.gc.svc.cluster.local:8765 via the companion Service.
 #
-# Uses a Deployment (not StatefulSet) because mail state is ephemeral —
-# the exec script caches read/archive state locally per pod in /tmp.
-# If persistence is needed later, add a PVC.
+# Uses a Deployment pinned to the server node with a PVC for mail durability
+# across pod restarts. mcp-agent-mail uses SQLite so multiple replicas won't
+# help — scale the single replica instead.
 #
 # Build the image first:
 #   docker build -f contrib/k8s/Dockerfile.mail -t gc-mcp-mail:latest .
@@ -28,6 +28,10 @@ spec:
       labels:
         app: mcp-mail
     spec:
+      # Pin mcp-mail to the server node alongside its PVC (local-path storage).
+      # Label the server node: kubectl label node <name> gc/role=server
+      nodeSelector:
+        gc/role: server
       containers:
       - name: mcp-mail
         image: gc-mcp-mail:latest
@@ -35,6 +39,9 @@ spec:
         ports:
         - containerPort: 8765
           name: http
+        volumeMounts:
+        - name: mail-data
+          mountPath: /var/lib/mcp-mail
         livenessProbe:
           httpGet:
             path: /health/liveness
@@ -59,3 +66,21 @@ spec:
           limits:
             cpu: "1"
             memory: 1Gi
+      volumes:
+      - name: mail-data
+        persistentVolumeClaim:
+          claimName: mcp-mail-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mcp-mail-data
+  namespace: gc
+  labels:
+    app: mcp-mail
+    app.kubernetes.io/part-of: gas-city
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

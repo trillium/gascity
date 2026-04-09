@@ -36,8 +36,9 @@ provider = "k8s"
 # K8s-specific settings. Env vars (GC_K8S_*) override TOML values.
 [session.k8s]
 namespace = "gc"
-# image = "gc-agent:latest"       # or set GC_K8S_IMAGE env var
-# context = ""                     # uses current kubeconfig context
+# image = "<SERVER_IP>:5000/gc-agent:latest"  # Mini2 host registry; or set GC_K8S_IMAGE
+# context = ""                     # uses current kubeconfig context; set to k3s context name
+                                    # e.g. "default" for k3s, "orbstack" for OrbStack
 # cpu_request = "500m"
 # mem_request = "1Gi"
 # cpu_limit = "2"

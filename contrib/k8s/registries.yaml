@@ -1,0 +1,26 @@
+# k3s registries.yaml — drop on every node at /etc/rancher/k3s/registries.yaml
+#
+# This configures k3s containerd to pull gc-agent and gc-mcp-mail images from
+# a plain registry:2 container running on the server node (Mini2).
+#
+# Setup (one-time on the server node):
+#   docker run -d --restart=always -p 5000:5000 --name registry registry:2
+#
+# Build and push:
+#   docker build -f contrib/k8s/Dockerfile.agent -t <SERVER_IP>:5000/gc-agent:latest .
+#   docker push <SERVER_IP>:5000/gc-agent:latest
+#
+#   docker build -f contrib/k8s/Dockerfile.mail -t <SERVER_IP>:5000/gc-mcp-mail:latest .
+#   docker push <SERVER_IP>:5000/gc-mcp-mail:latest
+#
+# Deploy this file to each node, then restart k3s:
+#   sudo cp registries.yaml /etc/rancher/k3s/registries.yaml
+#   sudo systemctl restart k3s        # server node
+#   sudo systemctl restart k3s-agent  # worker nodes
+#
+# Replace SERVER_IP with the actual IP of your server node (Mini2).
+
+mirrors:
+  "<SERVER_IP>:5000":
+    endpoint:
+      - "http://<SERVER_IP>:5000"

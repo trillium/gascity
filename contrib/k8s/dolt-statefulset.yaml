@@ -17,6 +17,10 @@ spec:
       labels:
         app: dolt
     spec:
+      # Pin Dolt to the server node so its local-path PV is always reachable.
+      # Label the server node: kubectl label node <name> gc/role=server
+      nodeSelector:
+        gc/role: server
       initContainers:
       - name: init-user
         image: dolthub/dolt:1.85.0
