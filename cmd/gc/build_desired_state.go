@@ -171,10 +171,9 @@ func buildDesiredStateWithSessionBeads(
 
 	desired := make(map[string]TemplateParams)
 	var pendingPools []poolEvalWork
-	// namedSessionScaleChecks collects scale_check evaluations for agents
-	// that back named sessions. These agents are materialized by the
-	// named-session pass (not the pool path), but their scale_check must
-	// still be evaluated so on_demand sessions detect work.
+	// Named-session agents with an explicit scale_check are evaluated here
+	// too — the named-session pass below uses the result as a demand signal
+	// for on_demand materialization (#508).
 	var namedSessionScaleChecks []poolEvalWork
 
 	for i := range cfg.Agents {
@@ -183,11 +182,9 @@ func buildDesiredStateWithSessionBeads(
 		}
 		// Agents that back configured named sessions are materialized by the
 		// named-session pass below so on-demand/always semantics stay centralized.
-		// However, we still evaluate their scale_check so that on_demand named
-		// sessions can use it as a demand signal.
 		if _, ok := findNamedSessionSpec(cfg, cityName, cfg.Agents[i].QualifiedName()); ok {
-			sp := scaleParamsFor(&cfg.Agents[i])
-			if sp.Check != "" {
+			if cfg.Agents[i].ScaleCheck != "" {
+				sp := scaleParamsFor(&cfg.Agents[i])
 				poolDir := agentCommandDir(cityPath, &cfg.Agents[i], cfg.Rigs)
 				namedSessionScaleChecks = append(namedSessionScaleChecks, poolEvalWork{agentIdx: i, sp: sp, poolDir: poolDir})
 			}
@@ -233,7 +230,11 @@ func buildDesiredStateWithSessionBeads(
 	// demand signal for new sessions. Computed once, returned in result.
 	// Named-session agents with custom scale_check are evaluated alongside
 	// pool agents so their results feed the named-session demand pass.
-	allScaleChecks := append(pendingPools, namedSessionScaleChecks...)
+	// Allocate a fresh slice to avoid aliasing pendingPools' backing array,
+	// which is still consumed below in the no-store branch.
+	allScaleChecks := make([]poolEvalWork, 0, len(pendingPools)+len(namedSessionScaleChecks))
+	allScaleChecks = append(allScaleChecks, pendingPools...)
+	allScaleChecks = append(allScaleChecks, namedSessionScaleChecks...)
 	scaleCheckCounts := evaluatePendingPoolsMap(cityPath, cfg, allScaleChecks, stderr, trace)
 
 	// Collect work beads with assignees — used for both pool demand and
@@ -335,8 +336,17 @@ func buildDesiredStateWithSessionBeads(
 	if len(assignedWorkBeads) > 0 {
 		fmt.Fprintf(stderr, "namedWorkReady: %d assigned beads, %d named specs, ready=%v\n", len(assignedWorkBeads), len(namedSpecs), namedWorkReady) //nolint:errcheck
 	}
+	// Determine demand for each on_demand named session. An explicit
+	// scale_check (evaluated above alongside pool agents) takes precedence
+	// over work_query, since it's the operator's direct signal and avoids
+	// a second subprocess spawn for the same agent.
 	for identity, spec := range namedSpecs {
 		if spec.Mode == "always" || namedWorkReady[identity] {
+			continue
+		}
+		if count := scaleCheckCounts[spec.Agent.QualifiedName()]; count > 0 {
+			fmt.Fprintf(stderr, "namedWorkReady: %s matched by scale_check (count=%d)\n", identity, count) //nolint:errcheck
+			namedWorkReady[identity] = true
 			continue
 		}
 		wq := spec.Agent.EffectiveWorkQuery()
@@ -349,19 +359,6 @@ func buildDesiredStateWithSessionBeads(
 			continue
 		}
 		if workQueryHasReadyWork(strings.TrimSpace(out)) {
-			namedWorkReady[identity] = true
-		}
-	}
-	// scale_check demand: if a named-session agent's scale_check returned > 0,
-	// treat that as demand — the scale_check is the operator's explicit signal
-	// that work exists, independent of the work_query path.
-	for identity, spec := range namedSpecs {
-		if spec.Mode == "always" || namedWorkReady[identity] {
-			continue
-		}
-		template := spec.Agent.QualifiedName()
-		if count, ok := scaleCheckCounts[template]; ok && count > 0 {
-			fmt.Fprintf(stderr, "namedWorkReady: %s matched by scale_check (count=%d)\n", identity, count) //nolint:errcheck
 			namedWorkReady[identity] = true
 		}
 	}
