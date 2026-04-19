@@ -24,13 +24,14 @@ type LookPathFunc func(string) (string, error)
 // Resolution chain:
 //  1. agent.StartCommand set? Escape hatch → ResolvedProvider{Command: startCommand}
 //  2. Determine provider name: agent.Provider > workspace.Provider > auto-detect
-//     (workspace.StartCommand is escape hatch if no provider name found)
+//     (when no provider name and no auto-detect but workspace.StartCommand is set,
+//     use it as a pure escape hatch with no provider metadata)
 //  3. Look up ProviderSpec: cityProviders[name] > BuiltinProviders()[name]
 //     (verify binary exists in PATH via lookPath)
 //  4. Merge agent-level overrides: non-zero agent fields replace base spec fields
 //     (env merges additively — agent env adds to/overrides base env)
-//     4b. workspace.StartCommand overrides command (preserves provider settings,
-//     clears Args/OptionsSchema/EffectiveDefaults)
+//  4b. workspace.StartCommand overrides the resolved command while preserving
+//     all provider metadata (prompt_mode, resume, hooks, etc.)
 //  5. Default prompt_mode to "arg" if still empty
 func ResolveProvider(agent *Agent, ws *Workspace, cityProviders map[string]ProviderSpec, lookPath LookPathFunc) (*ResolvedProvider, error) {
 	// Step 1: agent.StartCommand is the escape hatch.
@@ -48,16 +49,24 @@ func ResolveProvider(agent *Agent, ws *Workspace, cityProviders map[string]Provi
 		name = ws.Provider
 	}
 	if name == "" {
-		// No provider name — check workspace start_command escape hatch.
-		if ws != nil && ws.StartCommand != "" {
-			return &ResolvedProvider{Command: ws.StartCommand, PromptMode: "none"}, nil
+		// No provider name and no workspace start_command — auto-detect.
+		if ws == nil || ws.StartCommand == "" {
+			detected, err := detectProviderName(lookPath)
+			if err != nil {
+				return nil, err
+			}
+			name = detected
+		} else {
+			// No provider name but workspace start_command is set.
+			// Try auto-detect first so we can inherit provider metadata
+			// (prompt_mode, resume support, etc.), then override command.
+			detected, err := detectProviderName(lookPath)
+			if err != nil {
+				// No provider found at all — use start_command as escape hatch.
+				return &ResolvedProvider{Command: ws.StartCommand, PromptMode: "arg"}, nil
+			}
+			name = detected
 		}
-		// Auto-detect: scan PATH for known binaries.
-		detected, err := detectProviderName(lookPath)
-		if err != nil {
-			return nil, err
-		}
-		name = detected
 	}
 
 	// Step 3: look up the ProviderSpec.
@@ -71,15 +80,11 @@ func ResolveProvider(agent *Agent, ws *Workspace, cityProviders map[string]Provi
 	resolved.Kind = resolveProviderKind(name, cityProviders)
 	mergeAgentOverrides(resolved, agent)
 
-	// Step 4b: workspace.start_command overrides the resolved command when
-	// the agent doesn't set its own. Unlike the escape hatch at step 2
-	// (which returns a bare provider for the no-provider case), this path
-	// preserves all provider settings (PromptMode, ProcessNames, etc.)
-	// while replacing the command. Args, OptionsSchema, and
-	// EffectiveDefaults are cleared because start_command is the complete
-	// command line — appending schema-derived flags would conflict with
-	// the user's explicit command.
-	if agent.StartCommand == "" && ws != nil && ws.StartCommand != "" {
+	// Step 4b: workspace.start_command overrides the resolved command.
+	// This lets users configure a custom binary path while preserving
+	// all provider metadata (prompt_mode, resume support, hooks, etc.).
+	// Agent-level start_command (step 1) takes priority over this.
+	if ws != nil && ws.StartCommand != "" {
 		resolved.Command = ws.StartCommand
 		resolved.Args = nil
 		resolved.OptionsSchema = nil

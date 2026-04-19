@@ -134,8 +134,10 @@ func TestResolveProviderWorkspaceStartCommand(t *testing.T) {
 	if rp.Command != "my-agent --flag" {
 		t.Errorf("Command = %q, want %q", rp.Command, "my-agent --flag")
 	}
-	if rp.PromptMode != "none" {
-		t.Errorf("PromptMode = %q, want %q", rp.PromptMode, "none")
+	// When no provider is detected, the escape hatch defaults to "arg"
+	// so that workspace.start_command at least receives the prompt.
+	if rp.PromptMode != "arg" {
+		t.Errorf("PromptMode = %q, want %q", rp.PromptMode, "arg")
 	}
 }
 
@@ -1311,5 +1313,75 @@ provider = "codex"
 	}
 	if workerProvider.PromptFlag != "--message" {
 		t.Errorf("worker prompt flag = %q, want %q", workerProvider.PromptFlag, "--message")
+	}
+}
+
+// TestResolveProviderWorkspaceStartCommandOverridesResolvedProvider verifies
+// that workspace.start_command overrides the command from a resolved provider.
+// Bug gc-jh4: when workspace.provider = "claude" and workspace.start_command
+// is set, the start_command should override the provider's command, not be
+// ignored.
+func TestResolveProviderWorkspaceStartCommandOverridesResolvedProvider(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{
+		Name:         "city",
+		Provider:     "claude",
+		StartCommand: "/custom/bin/claude --custom",
+	}
+	rp, err := ResolveProvider(agent, ws, nil, lookPathAll)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "/custom/bin/claude --custom" {
+		t.Errorf("Command = %q, want %q (workspace.start_command should override provider command)", rp.Command, "/custom/bin/claude --custom")
+	}
+	// The provider name should still be resolved for metadata (hooks, ACP, etc.).
+	if rp.Name != "claude" {
+		t.Errorf("Name = %q, want %q (provider name should still be resolved)", rp.Name, "claude")
+	}
+	// Provider metadata (PromptMode, etc.) should still come from the resolved provider.
+	if rp.PromptMode == "" {
+		t.Error("PromptMode should be inherited from the resolved provider, got empty")
+	}
+}
+
+// TestResolveProviderAgentStartCommandWinsOverWorkspaceStartCommand verifies
+// that agent.start_command takes priority over workspace.start_command even
+// when a provider is resolved.
+func TestResolveProviderAgentStartCommandWinsOverWorkspaceStartCommand(t *testing.T) {
+	agent := &Agent{Name: "worker", StartCommand: "agent-custom-cmd"}
+	ws := &Workspace{
+		Name:         "city",
+		Provider:     "claude",
+		StartCommand: "/custom/bin/claude --custom",
+	}
+	rp, err := ResolveProvider(agent, ws, nil, lookPathAll)
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "agent-custom-cmd" {
+		t.Errorf("Command = %q, want %q (agent.start_command should win)", rp.Command, "agent-custom-cmd")
+	}
+}
+
+// TestResolveProviderWorkspaceStartCommandWithAutoDetect verifies that
+// workspace.start_command overrides the command even when the provider is
+// auto-detected (not explicitly configured).
+func TestResolveProviderWorkspaceStartCommandWithAutoDetect(t *testing.T) {
+	agent := &Agent{Name: "worker"}
+	ws := &Workspace{
+		Name:         "city",
+		StartCommand: "/custom/bin/claude --auto",
+	}
+	// No explicit provider, but claude is in PATH so it auto-detects.
+	rp, err := ResolveProvider(agent, ws, nil, lookPathOnly("claude"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+	if rp.Command != "/custom/bin/claude --auto" {
+		t.Errorf("Command = %q, want %q (workspace.start_command should override auto-detected provider)", rp.Command, "/custom/bin/claude --auto")
+	}
+	if rp.Name != "claude" {
+		t.Errorf("Name = %q, want %q", rp.Name, "claude")
 	}
 }
