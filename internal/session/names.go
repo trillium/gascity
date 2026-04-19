@@ -320,19 +320,14 @@ func ensureSessionNameAvailableForSelfAndOwner(store beads.Store, name, selfID, 
 		if b.ID == selfID {
 			continue
 		}
-		// Explicit session names are permanent identities; once claimed by any
-		// session bead, including a closed one, they are never reused.
-		//
-		// Exception: closed beads that belong to a configured named session
-		// (configured_named_session=true) release their session_name so the
-		// reconciler can re-materialize a fresh canonical bead for the same
-		// identity. The design doc specifies: "Closed historical beads do not
-		// poison future canonical materialization of the reserved identity."
+		// Session names on closed beads do not block reuse. Closed beads are
+		// historical records; blocking on them prevents agent restarts and
+		// session name recycling. Only open/in-progress beads reserve names.
 		if strings.TrimSpace(b.Metadata["session_name"]) == name {
-			if continuityIneligibleConfiguredOwner(b, selfOwner) {
+			if b.Status == "closed" {
 				continue
 			}
-			if b.Status == "closed" && strings.TrimSpace(b.Metadata["configured_named_session"]) == "true" {
+			if continuityIneligibleConfiguredOwner(b, selfOwner) {
 				continue
 			}
 			return fmt.Errorf("%w: %q already belongs to %s", ErrSessionNameExists, name, b.ID)
