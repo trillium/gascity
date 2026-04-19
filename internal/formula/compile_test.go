@@ -118,6 +118,57 @@ condition = "{{mode}} == slow"
 	}
 }
 
+func TestCompileNilVarsAppliesDefaultConditions(t *testing.T) {
+	dir := t.TempDir()
+	formulaContent := `
+formula = "nil-vars"
+version = 1
+
+[vars.mode]
+description = "Execution mode"
+default = "fast"
+
+[[steps]]
+id = "always"
+title = "Always runs"
+
+[[steps]]
+id = "slow-only"
+title = "Only in slow mode"
+condition = "{{mode}} == slow"
+
+[[steps]]
+id = "fast-only"
+title = "Only in fast mode"
+condition = "{{mode}} == fast"
+`
+	if err := os.WriteFile(filepath.Join(dir, "nil-vars.formula.toml"), []byte(formulaContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Passing nil vars must still apply defaults and filter by conditions.
+	// Before the fix, nil vars skipped FilterStepsByCondition entirely.
+	recipe, err := Compile(context.Background(), "nil-vars", []string{dir}, nil)
+	if err != nil {
+		t.Fatalf("Compile with nil vars: %v", err)
+	}
+
+	// Root + always + fast-only = 3 (slow-only filtered out by default mode=fast)
+	if len(recipe.Steps) != 3 {
+		t.Errorf("len(Steps) = %d, want 3 (slow-only filtered by default)", len(recipe.Steps))
+	}
+
+	// Verify slow-only is NOT present
+	if recipe.StepByID("nil-vars.slow-only") != nil {
+		t.Error("slow-only step should be filtered out with default mode=fast")
+	}
+
+	// Verify fast-only IS present
+	if recipe.StepByID("nil-vars.fast-only") == nil {
+		t.Error("fast-only step should be included with default mode=fast")
+	}
+}
+
 func TestCompileWithChildren(t *testing.T) {
 	dir := t.TempDir()
 	formulaContent := `

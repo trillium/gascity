@@ -100,12 +100,7 @@ Examples:
 				}
 			}
 
-			var compileVars map[string]string
-			if len(vars) > 0 {
-				compileVars = vars
-			}
-
-			recipe, err := formula.Compile(cmd.Context(), name, cityFormulaSearchPaths(), compileVars)
+			recipe, err := formula.Compile(cmd.Context(), name, cityFormulaSearchPaths(), vars)
 			if err != nil {
 				return err
 			}
