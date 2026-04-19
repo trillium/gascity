@@ -106,7 +106,7 @@ Examples:
 
 			compileVars := vars
 
-			recipe, err := formula.Compile(cmd.Context(), name, cityFormulaSearchPaths(), compileVars)
+			recipe, err := formula.Compile(cmd.Context(), name, allFormulaSearchPaths(), compileVars)
 			if err != nil {
 				return err
 			}
@@ -206,6 +206,7 @@ func newFormulaCookCmd(stdout, _ io.Writer) *cobra.Command {
 	var vars []string
 	var metadata []string
 	var attach string
+	var rig string
 	cmd := &cobra.Command{
 		Use:   "cook <formula-name>",
 		Short: "Instantiate a formula into the current bead store",
@@ -234,10 +235,11 @@ bead into a sub-workflow at runtime.`,
 				return err
 			}
 
+			searchPaths := cfg.FormulaLayers.SearchPaths(rig)
 			cookVars := parseFormulaVars(vars)
 
 			if attach != "" {
-				recipe, err := formula.Compile(cmd.Context(), args[0], cfg.FormulaLayers.City, cookVars)
+				recipe, err := formula.Compile(cmd.Context(), args[0], searchPaths, cookVars)
 				if err != nil {
 					return fmt.Errorf("compile: %w", err)
 				}
@@ -259,7 +261,7 @@ bead into a sub-workflow at runtime.`,
 				return nil
 			}
 
-			result, err := molecule.Cook(cmd.Context(), store, args[0], cfg.FormulaLayers.City, molecule.Options{
+			result, err := molecule.Cook(cmd.Context(), store, args[0], searchPaths, molecule.Options{
 				Title: title,
 				Vars:  cookVars,
 			})
@@ -294,6 +296,7 @@ bead into a sub-workflow at runtime.`,
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "variable substitution for formula (key=value, repeatable)")
 	cmd.Flags().StringArrayVar(&metadata, "meta", nil, "set root bead metadata after cook (key=value, repeatable)")
 	cmd.Flags().StringVar(&attach, "attach", "", "attach sub-DAG to existing bead (bead gains blocking dep on sub-DAG root)")
+	cmd.Flags().StringVar(&rig, "rig", "", "resolve formulas using rig-scoped search paths")
 	return cmd
 }
 
@@ -327,20 +330,6 @@ func parseMetadataArgs(items []string) (map[string]string, error) {
 		out[key] = value
 	}
 	return out, nil
-}
-
-// cityFormulaSearchPaths returns the city-level formula search paths.
-// Best-effort: returns nil if no city is loaded.
-func cityFormulaSearchPaths() []string {
-	cityPath, err := resolveCity()
-	if err != nil {
-		return nil
-	}
-	cfg, err := loadCityConfig(cityPath)
-	if err != nil {
-		return nil
-	}
-	return cfg.FormulaLayers.City
 }
 
 // allFormulaSearchPaths returns the deduplicated union of formula search
