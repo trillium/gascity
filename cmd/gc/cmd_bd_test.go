@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"strings"
 	"testing"
 	"time"
 
@@ -139,21 +138,7 @@ func TestExtractBdScopeFlags(t *testing.T) {
 	}
 }
 
-func TestResolveBdScopeTarget(t *testing.T) {
-	origProbe := bdBeadExists
-	defer func() { bdBeadExists = origProbe }()
-	bdBeadExists = func(_ string, _ execStoreTarget, beadID string) bool {
-		return beadID == "projectwrenunity-0xk" || beadID == "projectwrenunity-abc"
-	}
-	cityDir := filepath.Join(t.TempDir(), "city")
-	cfgForTest := func() *config.City {
-		return &config.City{
-			Workspace: config.Workspace{Name: "gascity"},
-			Rigs: []config.Rig{
-				{Name: "wren", Path: filepath.Join("rigs", "wren"), Prefix: "projectwrenunity"},
-				{Name: "gascity", Path: filepath.Join("rigs", "gascity")},
-			},
-		}
+
 func TestBdSubcommand(t *testing.T) {
 	tests := []struct {
 		name string
@@ -333,14 +318,22 @@ func TestValidateBdScope_ErrorMessage(t *testing.T) {
 	}
 }
 
-func TestResolveBdDir(t *testing.T) {
-	cfg := &config.City{
-		Rigs: []config.Rig{
-			{Name: "wren", Path: "/projects/wren", Prefix: "projectwrenunity"},
-			{Name: "gascity", Path: "/projects/gascity"},
-		},
+func TestResolveBdScopeTarget(t *testing.T) {
+	origProbe := bdBeadExists
+	defer func() { bdBeadExists = origProbe }()
+	bdBeadExists = func(_ string, _ execStoreTarget, beadID string) bool {
+		return beadID == "projectwrenunity-0xk" || beadID == "projectwrenunity-abc"
 	}
-
+	cityDir := filepath.Join(t.TempDir(), "city")
+	cfgForTest := func() *config.City {
+		return &config.City{
+			Workspace: config.Workspace{Name: "gascity"},
+			Rigs: []config.Rig{
+				{Name: "wren", Path: filepath.Join("rigs", "wren"), Prefix: "projectwrenunity"},
+				{Name: "gascity", Path: filepath.Join("rigs", "gascity")},
+			},
+		}
+	}
 	tests := []struct {
 		name      string
 		rigName   string
