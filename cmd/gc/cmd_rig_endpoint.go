@@ -150,7 +150,7 @@ func doRigSetEndpoint(fs fsys.FS, cityPath, rigName string, opts rigEndpointOpti
 		fmt.Fprintf(stderr, "gc rig set-endpoint: snapshot canonical files: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
-	if err := ensureCanonicalScopeMetadataIfPresent(fs, rig.Path); err != nil {
+	if err := ensureCanonicalScopeMetadataIfPresent(fs, rig.Path, targetState); err != nil {
 		writeRigEndpointRollbackError(fs, stderr, snapshots, "canonicalizing metadata", err)
 		return 1
 	}
@@ -279,7 +279,7 @@ func requireCanonicalScopeMetadata(fs fsys.FS, scopeRoot string) error {
 	return nil
 }
 
-func ensureCanonicalScopeMetadataIfPresent(fs fsys.FS, scopeRoot string) error {
+func ensureCanonicalScopeMetadataIfPresent(fs fsys.FS, scopeRoot string, endpointState contract.ConfigState) error {
 	path := filepath.Join(scopeRoot, ".beads", "metadata.json")
 	doltDatabase, err := func() (string, error) {
 		if err := requireCanonicalScopeMetadata(fs, scopeRoot); err != nil {
@@ -294,11 +294,14 @@ func ensureCanonicalScopeMetadataIfPresent(fs fsys.FS, scopeRoot string) error {
 	if err != nil {
 		return err
 	}
+	port, _ := strconv.Atoi(strings.TrimSpace(endpointState.DoltPort))
 	_, err = contract.EnsureCanonicalMetadata(fs, path, contract.MetadataState{
-		Database:     "dolt",
-		Backend:      "dolt",
-		DoltMode:     "server",
-		DoltDatabase: strings.TrimSpace(doltDatabase),
+		Database:       "dolt",
+		Backend:        "dolt",
+		DoltMode:       "server",
+		DoltDatabase:   strings.TrimSpace(doltDatabase),
+		DoltServerHost: strings.TrimSpace(endpointState.DoltHost),
+		DoltServerPort: port,
 	})
 	return err
 }

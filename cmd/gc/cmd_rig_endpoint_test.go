@@ -445,8 +445,20 @@ func TestDoRigSetEndpointCanonicalizesExistingMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if strings.Contains(text, "dolt_host") || strings.Contains(text, "dolt_server_port") {
-		t.Fatalf("metadata retained deprecated endpoint fields: %s", text)
+	// dolt_host (old deprecated key) must be scrubbed.
+	if strings.Contains(text, "\"dolt_host\"") {
+		t.Fatalf("metadata retained deprecated dolt_host field: %s", text)
+	}
+	// dolt_server_host and dolt_server_port must be set to the new endpoint.
+	var canonMeta map[string]any
+	if err := json.Unmarshal(data, &canonMeta); err != nil {
+		t.Fatalf("metadata is not valid JSON: %v", err)
+	}
+	if got, _ := canonMeta["dolt_server_host"].(string); got != "rig-db.example.com" {
+		t.Fatalf("metadata dolt_server_host = %q, want %q; full: %s", got, "rig-db.example.com", text)
+	}
+	if got, _ := canonMeta["dolt_server_port"].(float64); int(got) != 4406 {
+		t.Fatalf("metadata dolt_server_port = %v, want 4406; full: %s", canonMeta["dolt_server_port"], text)
 	}
 	doltDatabase, ok, err := contract.ReadDoltDatabase(fsys.OSFS{}, filepath.Join(rigDir, ".beads", "metadata.json"))
 	if err != nil {
