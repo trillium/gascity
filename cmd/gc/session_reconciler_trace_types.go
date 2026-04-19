@@ -157,6 +157,7 @@ const (
 	TraceOutcomeClosed                  TraceOutcomeCode = "closed"
 	TraceOutcomeRollback                TraceOutcomeCode = "rollback"
 	TraceOutcomeDeferredAttached        TraceOutcomeCode = "deferred_attached"
+	TraceOutcomeDeferredActive          TraceOutcomeCode = "deferred_active"
 	TraceOutcomeStop                    TraceOutcomeCode = "stop"
 	TraceOutcomeStartCandidate          TraceOutcomeCode = "start_candidate"
 	TraceOutcomeRetry                   TraceOutcomeCode = "retry"
