@@ -870,3 +870,39 @@ func TestWithCitySessionLocks_EmptyCityPathSharesIdentifierNamespace(t *testing.
 	}
 	<-acquired
 }
+
+func TestClosedBeadDoesNotBlockSessionNameReuse(t *testing.T) {
+	store := beads.NewMemStore()
+	b, _ := store.Create(beads.Bead{
+		Type:   BeadType,
+		Labels: []string{LabelSession},
+		Metadata: map[string]string{
+			"session_name": "worker-1",
+			"state":        "active",
+		},
+	})
+	_ = store.Close(b.ID)
+	err := ensureSessionNameAvailable(store, "worker-1")
+	if err != nil {
+		t.Fatalf("closed bead should not block name reuse: %v", err)
+	}
+}
+
+func TestOpenBeadBlocksSessionNameReuse(t *testing.T) {
+	store := beads.NewMemStore()
+	_, _ = store.Create(beads.Bead{
+		Type:   BeadType,
+		Labels: []string{LabelSession},
+		Metadata: map[string]string{
+			"session_name": "worker-1",
+			"state":        "active",
+		},
+	})
+	err := ensureSessionNameAvailable(store, "worker-1")
+	if err == nil {
+		t.Fatal("open bead should block name reuse")
+	}
+	if !errors.Is(err, ErrSessionNameExists) {
+		t.Fatalf("expected ErrSessionNameExists, got: %v", err)
+	}
+}

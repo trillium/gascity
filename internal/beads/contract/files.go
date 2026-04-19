@@ -47,18 +47,18 @@ type ConfigState struct {
 
 // MetadataState is the canonical subset of .beads/metadata.json used by GC.
 type MetadataState struct {
-	Database     string
-	Backend      string
-	DoltMode     string
-	DoltDatabase string
+	Database       string
+	Backend        string
+	DoltMode       string
+	DoltDatabase   string
+	DoltServerHost string
+	DoltServerPort int
 }
 
 var deprecatedMetadataKeys = []string{
 	"dolt_host",
 	"dolt_user",
 	"dolt_password",
-	"dolt_server_host",
-	"dolt_server_port",
 	"dolt_server_user",
 	"dolt_port",
 }
@@ -287,6 +287,35 @@ func EnsureCanonicalMetadata(fs fsys.FS, path string, state MetadataState) (bool
 			changed = true
 		}
 	}
+	// Sync dolt_server_host: write when set, remove when cleared.
+	// bd reads this field from metadata.json to resolve the Dolt endpoint.
+	host := strings.TrimSpace(state.DoltServerHost)
+	if host != "" {
+		if trimmedString(meta["dolt_server_host"]) != host {
+			meta["dolt_server_host"] = host
+			changed = true
+		}
+	} else {
+		if _, ok := meta["dolt_server_host"]; ok {
+			delete(meta, "dolt_server_host")
+			changed = true
+		}
+	}
+
+	// Sync dolt_server_port: write when set, remove when cleared.
+	// bd reads this field from metadata.json to resolve the Dolt endpoint.
+	if state.DoltServerPort > 0 {
+		if existing, _ := meta["dolt_server_port"].(float64); int(existing) != state.DoltServerPort {
+			meta["dolt_server_port"] = state.DoltServerPort
+			changed = true
+		}
+	} else {
+		if _, ok := meta["dolt_server_port"]; ok {
+			delete(meta, "dolt_server_port")
+			changed = true
+		}
+	}
+
 	for _, key := range deprecatedMetadataKeys {
 		if _, ok := meta[key]; ok {
 			delete(meta, key)
