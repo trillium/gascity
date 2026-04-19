@@ -65,7 +65,7 @@ func expandRalph(step *Step) ([]*Step, error) {
 	control := cloneStep(step)
 	control.Ralph = nil
 	control.Children = nil
-	control.Metadata = withMetadata(control.Metadata, map[string]string{
+	controlMeta := map[string]string{
 		"gc.kind":             "ralph",
 		"gc.step_id":          step.ID,
 		"gc.max_attempts":     strconv.Itoa(step.Ralph.MaxAttempts),
@@ -74,7 +74,11 @@ func expandRalph(step *Step) ([]*Step, error) {
 		"gc.check_timeout":    step.Ralph.Check.Timeout,
 		"gc.source_step_spec": string(stepSpec),
 		"gc.control_epoch":    "1",
-	})
+	}
+	if step.Timeout != "" {
+		controlMeta["gc.step_timeout"] = step.Timeout
+	}
+	control.Metadata = withMetadata(control.Metadata, controlMeta)
 	control.Needs = appendUniqueCopy(control.Needs, iterationID)
 	control.WaitsFor = ""
 

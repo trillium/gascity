@@ -173,6 +173,61 @@ func TestValidate_InvalidPriority(t *testing.T) {
 	}
 }
 
+func TestValidate_ValidTimeout(t *testing.T) {
+	formula := &Formula{
+		Formula: "mol-timeout",
+		Version: 1,
+		Type:    TypeWorkflow,
+		Steps: []*Step{
+			{ID: "build", Title: "Build", Timeout: "5m"},
+			{ID: "test", Title: "Test", Timeout: "10m30s"},
+			{ID: "lint", Title: "Lint", Timeout: "300s"},
+		},
+	}
+
+	if err := formula.Validate(); err != nil {
+		t.Errorf("Validate should pass for valid timeouts: %v", err)
+	}
+}
+
+func TestValidate_InvalidTimeout(t *testing.T) {
+	formula := &Formula{
+		Formula: "mol-bad-timeout",
+		Version: 1,
+		Type:    TypeWorkflow,
+		Steps: []*Step{
+			{ID: "step1", Title: "Step 1", Timeout: "not-a-duration"},
+		},
+	}
+
+	err := formula.Validate()
+	if err == nil {
+		t.Error("Validate should fail for invalid timeout format")
+	}
+}
+
+func TestValidate_InvalidTimeoutInChild(t *testing.T) {
+	formula := &Formula{
+		Formula: "mol-bad-child-timeout",
+		Version: 1,
+		Type:    TypeWorkflow,
+		Steps: []*Step{
+			{
+				ID:    "epic",
+				Title: "Epic",
+				Children: []*Step{
+					{ID: "child1", Title: "Child 1", Timeout: "bogus"},
+				},
+			},
+		},
+	}
+
+	err := formula.Validate()
+	if err == nil {
+		t.Error("Validate should fail for invalid child timeout format")
+	}
+}
+
 func TestValidate_ChildSteps(t *testing.T) {
 	formula := &Formula{
 		Formula: "mol-children",
