@@ -174,7 +174,9 @@ func beadsProviderFor(cfg *config.City) string {
 func (cs *controllerState) openRigStore(provider, rigPath string) beads.Store {
 	if strings.HasPrefix(provider, "exec:") {
 		s := beadsexec.NewStore(strings.TrimPrefix(provider, "exec:"))
-		s.SetEnv(citylayout.CityRuntimeEnvMap(cs.cityPath))
+		env := citylayout.CityRuntimeEnvMap(cs.cityPath)
+		env["BEADS_DIR"] = filepath.Join(rigPath, ".beads")
+		s.SetEnv(env)
 		return s
 	}
 	switch provider {

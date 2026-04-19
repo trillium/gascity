@@ -690,6 +690,128 @@ func TestExecStoreConformance(t *testing.T) {
 	})
 }
 
+// --- Store identity / BEADS_DIR propagation ---
+
+func TestSetEnv_beadsDirReachesScript(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "env.txt")
+
+	// Script that writes BEADS_DIR to a file on every operation.
+	script := writeScript(t, dir, `
+op="$1"; shift
+printf '%s' "$BEADS_DIR" > "`+outFile+`"
+case "$op" in
+  create)
+    cat > /dev/null
+    echo '{"id":"EX-1","title":"test","status":"open","type":"task","created_at":"2026-02-27T10:00:00Z"}'
+    ;;
+  get)
+    echo '{"id":"'"$1"'","title":"found","status":"open","type":"task","created_at":"2026-02-27T10:00:00Z"}'
+    ;;
+  update)
+    cat > /dev/null
+    ;;
+  close)
+    ;;
+  list)
+    echo '[{"id":"EX-1","title":"alpha","status":"open","type":"task","created_at":"2026-02-27T10:00:00Z"}]'
+    ;;
+  set-metadata)
+    cat > /dev/null
+    ;;
+  delete)
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	wantDir := "/some/rig/.beads"
+	s := NewStore(script)
+	s.SetEnv(map[string]string{"BEADS_DIR": wantDir})
+
+	// Test Create
+	if _, err := s.Create(beads.Bead{Title: "test"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "Create")
+
+	// Test Get
+	if _, err := s.Get("EX-1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "Get")
+
+	// Test Update
+	if err := s.Update("EX-1", beads.UpdateOpts{}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "Update")
+
+	// Test Close
+	if err := s.Close("EX-1"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "Close")
+
+	// Test ListOpen
+	if _, err := s.ListOpen(); err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "ListOpen")
+
+	// Test SetMetadata
+	if err := s.SetMetadata("EX-1", "key", "val"); err != nil {
+		t.Fatalf("SetMetadata: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "SetMetadata")
+
+	// Test Delete
+	if err := s.Delete("EX-1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	assertFileContains(t, outFile, wantDir, "Delete")
+}
+
+func TestSetEnv_multipleStoresGetDistinctDirs(t *testing.T) {
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "env.txt")
+
+	script := writeScript(t, dir, `
+printf '%s' "$BEADS_DIR" > "`+outFile+`"
+case "$1" in
+  list) echo '[]' ;;
+  *) exit 2 ;;
+esac
+`)
+	// Two stores pointing at different BEADS_DIR values (simulating
+	// city HQ vs rig in a K8s multi-prefix setup).
+	storeA := NewStore(script)
+	storeA.SetEnv(map[string]string{"BEADS_DIR": "/city/.beads"})
+
+	storeB := NewStore(script)
+	storeB.SetEnv(map[string]string{"BEADS_DIR": "/rig-alpha/.beads"})
+
+	if _, err := storeA.ListOpen(); err != nil {
+		t.Fatalf("storeA.ListOpen: %v", err)
+	}
+	assertFileContains(t, outFile, "/city/.beads", "storeA")
+
+	if _, err := storeB.ListOpen(); err != nil {
+		t.Fatalf("storeB.ListOpen: %v", err)
+	}
+	assertFileContains(t, outFile, "/rig-alpha/.beads", "storeB")
+}
+
+func assertFileContains(t *testing.T, path, want, op string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%s: reading file: %v", op, err)
+	}
+	if string(data) != want {
+		t.Errorf("%s: BEADS_DIR = %q, want %q", op, string(data), want)
+	}
+}
+
 // --- Compile-time interface check ---
 
 var _ beads.Store = (*Store)(nil)

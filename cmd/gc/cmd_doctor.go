@@ -245,7 +245,9 @@ func openStore(dirPath string) (beads.Store, error) {
 	switch {
 	case strings.HasPrefix(prov, "exec:"):
 		store := beadsexec.NewStore(strings.TrimPrefix(prov, "exec:"))
-		store.SetEnv(citylayout.CityRuntimeEnvMap(cityPath))
+		env := citylayout.CityRuntimeEnvMap(cityPath)
+		env["BEADS_DIR"] = filepath.Join(dirPath, ".beads")
+		store.SetEnv(env)
 		return store, nil
 	case prov == "file":
 		return beads.OpenFileStore(fsys.OSFS{}, filepath.Join(cityPath, ".gc", "beads.json"))

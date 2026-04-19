@@ -31,6 +31,12 @@ func (s *Store) SetEnv(env map[string]string) {
 	s.env = env
 }
 
+// Env returns the environment variables configured for this store.
+// Returns nil if no custom environment has been set.
+func (s *Store) Env() map[string]string {
+	return s.env
+}
+
 // NewStore returns a Store that delegates to the given script.
 // The script path may be absolute, relative, or a bare name resolved via
 // exec.LookPath.
