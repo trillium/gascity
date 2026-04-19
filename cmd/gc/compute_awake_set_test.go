@@ -1177,3 +1177,37 @@ func TestScaledPool_NotAffectedByRunningOverride(t *testing.T) {
 	})
 	assertAsleep(t, result, "polecat-mc-1")
 }
+
+// After drain-ack, a named-always session bead has Drained=true
+// (sleep_reason="drained"). The reconciler must still respawn it because
+// "always" mode means the session should always be running.
+func TestNamedAlways_DrainedRespawns(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "mayor"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "mayor", Template: "mayor", Mode: "always"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "mayor", Template: "mayor", State: "asleep",
+			NamedIdentity: "mayor", Drained: true,
+		}},
+		Now: now,
+	})
+	assertAwake(t, result, "mayor")
+	assertReason(t, result, "mayor", "named-always")
+}
+
+// When a drained pool bead exists alongside a new creating bead, the scaled
+// demand path should wake the creating bead and leave the drained one asleep.
+func TestScaledAgent_DrainedOldBead_CreatingNewBead(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents: []AwakeAgent{{QualifiedName: "worker"}},
+		SessionBeads: []AwakeSessionBead{
+			{ID: "old-1", SessionName: "s-old-1", Template: "worker", State: "asleep",
+				Drained: true},
+			{ID: "new-1", SessionName: "s-new-1", Template: "worker", State: "creating"},
+		},
+		ScaleCheckCounts: map[string]int{"worker": 1},
+		Now:              now,
+	})
+	assertAsleep(t, result, "s-old-1")
+	assertAwake(t, result, "s-new-1")
+}

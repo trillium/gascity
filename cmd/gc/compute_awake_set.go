@@ -101,7 +101,9 @@ func ComputeAwakeSet(input AwakeInput) map[string]AwakeDecision {
 		case "always":
 			if sn := findNamedSessionName(input.SessionBeads, ns.Identity); sn != "" {
 				bead := findBeadBySessionName(input.SessionBeads, sn)
-				if bead != nil && !bead.Drained && !bead.DependencyOnly {
+				// Named-always sessions respawn after drain-ack.
+				// preWakeCommit clears the drained sleep_reason.
+				if bead != nil && !bead.DependencyOnly {
 					desired[sn] = "named-always"
 				}
 			} else {
