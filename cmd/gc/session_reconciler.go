@@ -584,6 +584,20 @@ func reconcileSessionBeadsTraced(
 						}
 						runtime.LogCoreFingerprintDrift(stderr, name, storedBreakdown, agentCfg)
 						if isNamedSessionBead(*session) {
+							// Defer config-drift restart for named sessions
+							// that are actively in use (pending interaction,
+							// tmux-attached, or recent activity). This prevents
+							// draining a working agent mid-task without graceful
+							// handoff. See gastownhall/gascity#119.
+							if namedSessionActivelyInUse(*session, sp, name, clk) {
+								if trace != nil {
+									trace.recordDecision("reconciler.session.config_drift", tp.TemplateName, name, "config_drift", "deferred_active", traceRecordPayload{
+										"stored_hash":  storedHash,
+										"current_hash": currentHash,
+									}, nil, "")
+								}
+								continue
+							}
 							resetConfiguredNamedSessionForConfigDrift(session, store, sp, name, alive, "creating", stderr)
 							if trace != nil {
 								trace.recordDecision("reconciler.session.config_drift", tp.TemplateName, name, "config_drift", "restart_in_place", traceRecordPayload{
@@ -601,7 +615,7 @@ func reconcileSessionBeadsTraced(
 						}
 						// Defer ordinary-session config-drift drain while a
 						// user is attached. Named-session config drift is
-						// non-deferrable and is handled above.
+						// deferred when actively in use (see above).
 						if pendingInteractionKeepsAwake(*session, sp, name, clk) {
 							drainCancelled := false
 							if dt != nil {
@@ -1027,6 +1041,43 @@ func sessionHasOpenAssignedWorkInStore(store beads.Store, session beads.Bead) (b
 		}
 	}
 	return false, nil
+}
+
+// namedSessionActivityThreshold is the maximum age of the last activity
+// timestamp for a named session to be considered "actively in use" for
+// config-drift deferral. Sessions with activity more recent than this
+// threshold will not be drained for config-drift.
+const namedSessionActivityThreshold = 2 * time.Minute
+
+// namedSessionActivelyInUse returns true if a named session is currently
+// in active use and should not be immediately drained for config-drift.
+// It checks three signals beyond tmux attachment:
+//  1. A pending interaction (user waiting for response)
+//  2. Tmux session attachment
+//  3. Recent activity within the activity threshold
+//
+// This prevents config-drift from killing a working agent mid-task.
+func namedSessionActivelyInUse(session beads.Bead, sp runtime.Provider, name string, clk clock.Clock) bool {
+	if sp == nil || name == "" {
+		return false
+	}
+	// Pending interaction means a user is actively waiting.
+	if pendingInteractionKeepsAwake(session, sp, name, clk) {
+		return true
+	}
+	// Tmux attachment means a user is watching.
+	if sp.IsAttached(name) {
+		return true
+	}
+	// Recent activity means the agent is actively working.
+	if clk != nil {
+		if lastActivity, err := sp.GetLastActivity(name); err == nil && !lastActivity.IsZero() {
+			if clk.Now().Sub(lastActivity) < namedSessionActivityThreshold {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resetConfiguredNamedSessionForConfigDrift(
