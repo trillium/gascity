@@ -199,7 +199,7 @@ func TestDoSlingBeadToFixedAgent(t *testing.T) {
 	if len(runner.calls) != 1 {
 		t.Fatalf("got %d runner calls, want 1: %v", len(runner.calls), runner.calls)
 	}
-	want := "bd update 'BL-42' --set-metadata gc.routed_to=mayor"
+	want := "bd update 'BL-42' --set-metadata gc.routed_to=mayor --assignee ''"
 	if runner.calls[0] != want {
 		t.Errorf("runner call = %q, want %q", runner.calls[0], want)
 	}
@@ -302,9 +302,67 @@ func TestDoSlingBeadToPool(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
 	}
-	want := "bd update 'HW-7' --set-metadata gc.routed_to=hello-world/polecat"
+	want := "bd update 'HW-7' --set-metadata gc.routed_to=hello-world/polecat --assignee ''"
 	if runner.calls[0] != want {
 		t.Errorf("runner call = %q, want %q", runner.calls[0], want)
+	}
+}
+
+// TestDoSlingClearsAssigneeForPool is a regression test for gc-1xk:
+// when a bead with an existing assignee is slung to a pool, the sling
+// query must clear the assignee so pool agents using --unassigned can
+// discover it.
+func TestDoSlingClearsAssigneeForPool(t *testing.T) {
+	runner := newFakeRunner()
+	sp := runtime.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{
+		Name:              "polecat",
+		Dir:               "hello-world",
+		MinActiveSessions: intPtr(1), MaxActiveSessions: intPtr(3),
+	}
+
+	// Bead already assigned to the user who created it.
+	q := &fakeQuerier{bead: beads.Bead{ID: "HW-7", Assignee: "Trillium Smith"}}
+
+	deps, _, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "HW-7")
+	code := doSling(opts, deps, q)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("got %d runner calls, want 1: %v", len(runner.calls), runner.calls)
+	}
+	// The sling query must include --assignee '' to clear the existing
+	// assignee, otherwise pool polecats querying with --unassigned won't
+	// see this bead.
+	if !strings.Contains(runner.calls[0], "--assignee ''") {
+		t.Errorf("sling query = %q, must contain --assignee '' to clear existing assignee for pool dispatch", runner.calls[0])
+	}
+}
+
+// TestDoSlingClearsAssigneeForFixedAgent verifies that the default sling
+// query clears the assignee even for fixed agents, since the work query
+// Tier 3 also uses --unassigned for metadata-routed beads.
+func TestDoSlingClearsAssigneeForFixedAgent(t *testing.T) {
+	runner := newFakeRunner()
+	sp := runtime.NewFake()
+	cfg := &config.City{Workspace: config.Workspace{Name: "test-city"}}
+	a := config.Agent{Name: "mayor", MaxActiveSessions: intPtr(1)}
+
+	q := &fakeQuerier{bead: beads.Bead{ID: "BL-42", Assignee: "Trillium Smith"}}
+
+	deps, _, stderr := testDeps(cfg, sp, runner.run)
+	opts := testOpts(a, "BL-42")
+	code := doSling(opts, deps, q)
+
+	if code != 0 {
+		t.Fatalf("doSling returned %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(runner.calls[0], "--assignee ''") {
+		t.Errorf("sling query = %q, must contain --assignee '' to clear existing assignee", runner.calls[0])
 	}
 }
 
@@ -327,7 +385,7 @@ func TestDoSlingFormulaToAgent(t *testing.T) {
 		t.Fatalf("got %d runner calls, want 1: %v", len(runner.calls), runner.calls)
 	}
 	// The MemStore generates IDs like "gc-1".
-	wantSling := "bd update 'gc-1' --set-metadata gc.routed_to=mayor"
+	wantSling := "bd update 'gc-1' --set-metadata gc.routed_to=mayor --assignee ''"
 	if runner.calls[0] != wantSling {
 		t.Errorf("runner call = %q, want %q", runner.calls[0], wantSling)
 	}
@@ -1306,7 +1364,7 @@ func TestOnFormulaAttachesAndRoutes(t *testing.T) {
 		t.Fatalf("got %d runner calls, want 1: %v", len(runner.calls), runner.calls)
 	}
 	// --on routes the ORIGINAL bead (not the wisp root).
-	wantSling := "bd update 'BL-42' --set-metadata gc.routed_to=mayor"
+	wantSling := "bd update 'BL-42' --set-metadata gc.routed_to=mayor --assignee ''"
 	if runner.calls[0] != wantSling {
 		t.Errorf("runner call = %q, want %q", runner.calls[0], wantSling)
 	}
@@ -2425,7 +2483,7 @@ func TestDryRunSingleBead(t *testing.T) {
 	if !strings.Contains(out, "Agent:       mayor (fixed agent)") {
 		t.Errorf("stdout missing agent info: %s", out)
 	}
-	if !strings.Contains(out, "Sling query: bd update {} --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "Sling query: bd update {} --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing sling query: %s", out)
 	}
 	// Work section.
@@ -2436,7 +2494,7 @@ func TestDryRunSingleBead(t *testing.T) {
 		t.Errorf("stdout missing bead title: %s", out)
 	}
 	// Route command.
-	if !strings.Contains(out, "bd update 'BL-42' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-42' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing route command: %s", out)
 	}
 	// Footer.
@@ -2510,7 +2568,7 @@ func TestDryRunOnFormula(t *testing.T) {
 	if !strings.Contains(out, "Pre-check: BL-42 has no existing molecule/wisp children") {
 		t.Errorf("stdout missing pre-check: %s", out)
 	}
-	if !strings.Contains(out, "bd update 'BL-42' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-42' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing route command: %s", out)
 	}
 	if len(runner.calls) != 0 {
@@ -2540,7 +2598,7 @@ func TestDryRunPool(t *testing.T) {
 	if !strings.Contains(out, "Pool:        hw/polecat (min=1 max=3)") {
 		t.Errorf("stdout missing pool info: %s", out)
 	}
-	if !strings.Contains(out, "bd update {} --set-metadata gc.routed_to=hw/polecat") {
+	if !strings.Contains(out, "bd update {} --set-metadata gc.routed_to=hw/polecat --assignee ''") {
 		t.Errorf("stdout missing sling query: %s", out)
 	}
 	if !strings.Contains(out, "Pool agents share a work queue via labels") {
@@ -2592,13 +2650,13 @@ func TestDryRunConvoy(t *testing.T) {
 		t.Errorf("stdout missing skip indicator: %s", out)
 	}
 	// Route commands.
-	if !strings.Contains(out, "bd update 'BL-1' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-1' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing BL-1 route command: %s", out)
 	}
-	if !strings.Contains(out, "bd update 'BL-3' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-3' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing BL-3 route command: %s", out)
 	}
-	if strings.Contains(out, "bd update 'BL-2' --set-metadata gc.routed_to=mayor") {
+	if strings.Contains(out, "bd update 'BL-2' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout should not route closed BL-2: %s", out)
 	}
 	// Zero mutations.
@@ -2642,10 +2700,10 @@ func TestDryRunBatchOnFormula(t *testing.T) {
 		t.Errorf("stdout should not cook for closed BL-2: %s", out)
 	}
 	// Route commands.
-	if !strings.Contains(out, "bd update 'BL-1' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-1' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing BL-1 route: %s", out)
 	}
-	if !strings.Contains(out, "bd update 'BL-3' --set-metadata gc.routed_to=mayor") {
+	if !strings.Contains(out, "bd update 'BL-3' --set-metadata gc.routed_to=mayor --assignee ''") {
 		t.Errorf("stdout missing BL-3 route: %s", out)
 	}
 	if len(runner.calls) != 0 {
