@@ -329,6 +329,17 @@ func cmdSling(args []string, isFormula, doNudge, force bool, title string, vars 
 	// Skip during dry-run to avoid side effects.
 	// Also check if the bead exists in the store — hierarchical IDs like
 	// "Prefix-abc.1" have dots that looksLikeBeadID doesn't recognize.
+	//
+	// Scope guard: when inline text would create a bead in the HQ store but
+	// rigs exist, warn the user. The agent's rig (if any) already resolved
+	// storeDir above; this catches city-scoped agents where storeDir is still
+	// cityPath. Use --force to bypass.
+	if !isFormula && !dryRun && !looksLikeBeadID(beadOrFormula) && !beadExistsInStore(store, beadOrFormula) {
+		if msg := checkSlingStoreScope(cfg, storeDir, cityPath, force); msg != "" {
+			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
 	if !isFormula && !dryRun && !looksLikeBeadID(beadOrFormula) && !beadExistsInStore(store, beadOrFormula) {
 		created, err := store.Create(beads.Bead{Title: beadOrFormula, Description: stdinDescription, Type: "task"})
 		if err != nil {
@@ -2000,4 +2011,25 @@ func checkCrossRig(beadID string, a config.Agent, cfg *config.City) string {
 	}
 	return fmt.Sprintf("gc sling: cross-rig routing blocked — bead %s (prefix %q) targets %s (rig prefix %q); use --force to override",
 		beadID, bp, a.QualifiedName(), rp)
+}
+
+// checkSlingStoreScope returns a non-empty error message when inline text
+// would create a bead in the HQ store but the city has rigs configured.
+// Returns "" when the check passes (no rigs, store is rig-scoped, or force).
+func checkSlingStoreScope(cfg *config.City, storeDir, cityPath string, force bool) string {
+	if force || len(cfg.Rigs) == 0 {
+		return ""
+	}
+	if filepath.Clean(storeDir) != filepath.Clean(cityPath) {
+		return ""
+	}
+	rigNames := make([]string, 0, len(cfg.Rigs))
+	for _, r := range cfg.Rigs {
+		rigNames = append(rigNames, r.Name)
+	}
+	return fmt.Sprintf(
+		"gc sling: refusing to create bead in HQ store — this city has rigs (%s). "+
+			"Route to a rig-scoped agent, or use --force to target HQ.",
+		strings.Join(rigNames, ", "),
+	)
 }

@@ -3204,6 +3204,57 @@ func TestCheckCrossRigCityAgent(t *testing.T) {
 	}
 }
 
+func TestCheckSlingStoreScopeBlocksHQWithRigs(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{
+			{Name: "frontend", Path: "/projects/frontend"},
+			{Name: "backend", Path: "/projects/backend"},
+		},
+	}
+
+	msg := checkSlingStoreScope(cfg, "/city", "/city", false)
+	if msg == "" {
+		t.Fatal("expected non-empty message when creating in HQ with rigs")
+	}
+	if !strings.Contains(msg, "frontend") {
+		t.Errorf("message should list rig names: %q", msg)
+	}
+	if !strings.Contains(msg, "--force") {
+		t.Errorf("message should mention --force: %q", msg)
+	}
+}
+
+func TestCheckSlingStoreScopeAllowsRigStore(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "frontend", Path: "/projects/frontend"}},
+	}
+
+	msg := checkSlingStoreScope(cfg, "/projects/frontend", "/city", false)
+	if msg != "" {
+		t.Errorf("rig-scoped store should be allowed, got: %q", msg)
+	}
+}
+
+func TestCheckSlingStoreScopeAllowsForce(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{{Name: "frontend", Path: "/projects/frontend"}},
+	}
+
+	msg := checkSlingStoreScope(cfg, "/city", "/city", true)
+	if msg != "" {
+		t.Errorf("--force should bypass guard, got: %q", msg)
+	}
+}
+
+func TestCheckSlingStoreScopeAllowsNoRigs(t *testing.T) {
+	cfg := &config.City{}
+
+	msg := checkSlingStoreScope(cfg, "/city", "/city", false)
+	if msg != "" {
+		t.Errorf("no rigs should bypass guard, got: %q", msg)
+	}
+}
+
 func TestDoSlingCrossRigBlocks(t *testing.T) {
 	runner := newFakeRunner()
 	sp := runtime.NewFake()

@@ -54,11 +54,22 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Extract --rig from args (since DisableFlagParsing prevents cobra from
-	// parsing it). The remaining args are forwarded to bd.
+	// Extract --rig and --hq from args (since DisableFlagParsing prevents
+	// cobra from parsing them). The remaining args are forwarded to bd.
 	rigName, bdArgs := extractRigFlag(args)
+	hqExplicit, bdArgs := extractHQFlag(bdArgs)
 
 	dir := resolveBdDir(cfg, cityPath, rigName, bdArgs)
+
+	// Guard: when the resolved dir is city root (HQ), rigs exist, and the
+	// user didn't explicitly request HQ, block mutating commands to prevent
+	// accidentally creating rig-scoped work in the wrong store.
+	if dir == cityPath && len(cfg.Rigs) > 0 && !hqExplicit && rigName == "" {
+		if msg := checkBdScopeGuard(bdArgs, cfg); msg != "" {
+			fmt.Fprintln(stderr, msg) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+	}
 
 	bdPath, err := exec.LookPath("bd")
 	if err != nil {
@@ -102,6 +113,60 @@ func doBd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// extractHQFlag extracts --hq from the argument list and returns whether
+// it was present plus the remaining args. Used to explicitly confirm that
+// a bd command targets the city HQ store.
+func extractHQFlag(args []string) (bool, []string) {
+	var found bool
+	var rest []string
+	for _, arg := range args {
+		if arg == "--hq" {
+			found = true
+			continue
+		}
+		rest = append(rest, arg)
+	}
+	return found, rest
+}
+
+// isMutatingBdSubcommand returns true if the bd subcommand modifies the
+// store (create, update, close). Read-only commands (list, show, search,
+// ready) are safe to fall back to HQ without a guard.
+func isMutatingBdSubcommand(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		switch arg {
+		case "create", "update", "close":
+			return true
+		}
+		// First non-flag arg is the subcommand; stop scanning.
+		return false
+	}
+	return false
+}
+
+// checkBdScopeGuard returns a non-empty error message when a mutating bd
+// command would silently target the HQ store even though rigs exist. The
+// caller should only invoke this when dir resolved to cityPath without an
+// explicit --rig or --hq.
+func checkBdScopeGuard(bdArgs []string, cfg *config.City) string {
+	if !isMutatingBdSubcommand(bdArgs) || len(cfg.Rigs) == 0 {
+		return ""
+	}
+	rigNames := make([]string, 0, len(cfg.Rigs))
+	for _, r := range cfg.Rigs {
+		rigNames = append(rigNames, r.Name)
+	}
+	return fmt.Sprintf(
+		"gc bd: refusing to create/modify beads in the HQ store — "+
+			"this city has rigs (%s). Use --rig <name> to target a rig, "+
+			"or --hq to explicitly target the city HQ store.",
+		strings.Join(rigNames, ", "),
+	)
 }
 
 // extractRigFlag extracts --rig <name> from the argument list and returns
