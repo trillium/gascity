@@ -965,6 +965,161 @@ func TestExecStoreConformance(t *testing.T) {
 	})
 }
 
+// --- Store directory propagation ---
+
+func TestSetStoreDir_passesBeadsDirToScript(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+
+	script := writeScript(t, dir, `
+case "$1" in
+  list)
+    echo "$BEADS_DIR" > "`+envFile+`"
+    echo "[]"
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	s := NewStore(script)
+	s.SetStoreDir("/my/custom/store")
+
+	_, err := s.ListOpen()
+	if err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	if got != "/my/custom/store/.beads" {
+		t.Errorf("BEADS_DIR = %q, want %q", got, "/my/custom/store/.beads")
+	}
+}
+
+func TestSetStoreDir_propagatesToAllCRUDOps(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+
+	// Script captures BEADS_DIR for every operation.
+	script := writeScript(t, dir, `
+echo "$BEADS_DIR" >> "`+envFile+`"
+case "$1" in
+  create)
+    cat > /dev/null
+    echo '{"id":"EX-1","title":"test","status":"open","type":"task","created_at":"2026-02-27T10:00:00Z"}'
+    ;;
+  get)
+    echo '{"id":"'"$2"'","title":"found","status":"open","type":"task","created_at":"2026-02-27T10:00:00Z"}'
+    ;;
+  update) cat > /dev/null ;;
+  close) ;;
+  list) echo "[]" ;;
+  set-metadata) cat > /dev/null ;;
+  delete) ;;
+  *) exit 2 ;;
+esac
+`)
+	storeDir := "/test/rig/path"
+	s := NewStore(script)
+	s.SetStoreDir(storeDir)
+
+	// Exercise every CRUD operation.
+	_, _ = s.Create(beads.Bead{Title: "test"})
+	_, _ = s.Get("EX-1")
+	_ = s.Update("EX-1", beads.UpdateOpts{})
+	_ = s.Close("EX-1")
+	_, _ = s.ListOpen()
+	_ = s.SetMetadata("EX-1", "k", "v")
+	_ = s.Delete("EX-1")
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := storeDir + "/.beads"
+	for i, line := range lines {
+		if strings.TrimSpace(line) != want {
+			t.Errorf("operation %d: BEADS_DIR = %q, want %q", i, strings.TrimSpace(line), want)
+		}
+	}
+	if len(lines) != 7 {
+		t.Errorf("expected 7 operations, got %d", len(lines))
+	}
+}
+
+func TestSetStoreDir_combinesWithSetEnv(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+
+	script := writeScript(t, dir, `
+case "$1" in
+  list)
+    echo "BEADS_DIR=$BEADS_DIR" >> "`+envFile+`"
+    echo "GC_CITY_PATH=$GC_CITY_PATH" >> "`+envFile+`"
+    echo "[]"
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	s := NewStore(script)
+	s.SetEnv(map[string]string{"GC_CITY_PATH": "/my/city"})
+	s.SetStoreDir("/my/rig")
+
+	_, err := s.ListOpen()
+	if err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "BEADS_DIR=/my/rig/.beads") {
+		t.Errorf("expected BEADS_DIR=/my/rig/.beads in env, got:\n%s", content)
+	}
+	if !strings.Contains(content, "GC_CITY_PATH=/my/city") {
+		t.Errorf("expected GC_CITY_PATH=/my/city in env, got:\n%s", content)
+	}
+}
+
+func TestSetStoreDir_overridesBeadsDirFromSetEnv(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+
+	script := writeScript(t, dir, `
+case "$1" in
+  list)
+    echo "$BEADS_DIR" > "`+envFile+`"
+    echo "[]"
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	s := NewStore(script)
+	// SetEnv sets BEADS_DIR to one value...
+	s.SetEnv(map[string]string{"BEADS_DIR": "/wrong/path/.beads"})
+	// ...but SetStoreDir should override it.
+	s.SetStoreDir("/correct/path")
+
+	_, err := s.ListOpen()
+	if err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env file: %v", err)
+	}
+	got := strings.TrimSpace(string(data))
+	if got != "/correct/path/.beads" {
+		t.Errorf("BEADS_DIR = %q, want %q (SetStoreDir should override SetEnv)", got, "/correct/path/.beads")
+	}
+}
+
 // --- Compile-time interface check ---
 
 var _ beads.Store = (*Store)(nil)
