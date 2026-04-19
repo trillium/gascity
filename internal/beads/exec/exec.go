@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,14 +22,23 @@ import (
 // Exit codes: 0 = success, 1 = error (stderr has message), 2 = unknown
 // operation (treated as success for forward compatibility).
 type Store struct {
-	script  string
-	timeout time.Duration
-	env     map[string]string
+	script   string
+	timeout  time.Duration
+	env      map[string]string
+	storeDir string // directory whose .beads/ subtree the script should target
 }
 
 // SetEnv sets environment variables passed to the script process.
 func (s *Store) SetEnv(env map[string]string) {
 	s.env = env
+}
+
+// SetStoreDir sets the store directory so that the script receives
+// BEADS_DIR=<dir>/.beads in its environment. This is how multi-prefix
+// deployments (e.g. K8s with city + rig stores) route CRUD operations
+// to the correct store. When set, BEADS_DIR from SetEnv is overridden.
+func (s *Store) SetStoreDir(dir string) {
+	s.storeDir = dir
 }
 
 // NewStore returns a Store that delegates to the given script.
@@ -55,10 +65,17 @@ func (s *Store) run(stdinData []byte, args ...string) (string, error) {
 	// expires, even if grandchild processes still hold them open.
 	cmd.WaitDelay = 2 * time.Second
 
-	if len(s.env) > 0 {
+	if len(s.env) > 0 || s.storeDir != "" {
 		cmd.Env = os.Environ()
 		for k, v := range s.env {
 			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		if s.storeDir != "" {
+			// Override BEADS_DIR so the script targets the correct
+			// store in multi-prefix deployments. Appending after
+			// s.env ensures storeDir wins over any BEADS_DIR from
+			// SetEnv.
+			cmd.Env = append(cmd.Env, "BEADS_DIR="+filepath.Join(s.storeDir, ".beads"))
 		}
 	}
 

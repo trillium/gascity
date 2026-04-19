@@ -548,6 +548,7 @@ func openStoreAtForCity(storePath, cityPath string) (beads.Store, error) {
 	if strings.HasPrefix(provider, "exec:") {
 		store := beadsexec.NewStore(strings.TrimPrefix(provider, "exec:"))
 		store.SetEnv(citylayout.CityRuntimeEnvMap(runtimeCityPath))
+		store.SetStoreDir(storePath)
 		return store, nil
 	}
 	switch provider {
