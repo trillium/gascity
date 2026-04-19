@@ -8,11 +8,11 @@ import (
 )
 
 // cityGitignoreEntries are the paths that gc init writes into .gitignore.
-var cityGitignoreEntries = []string{".gc/", ".beads/*", "!.beads/config.yaml", "!.beads/metadata.json", "hooks/", ".runtime/"}
+var cityGitignoreEntries = []string{".gc/", ".beads/*", "!.beads/config.yaml", "!.beads/metadata.json", "hooks/", ".runtime/", ".claude/", ".codex/", ".gemini/", ".opencode/"}
 
 // rigGitignoreEntries are the paths that gc rig add writes into
 // the rig-scoped .gitignore.
-var rigGitignoreEntries = []string{".beads/*", "!.beads/config.yaml", "!.beads/metadata.json"}
+var rigGitignoreEntries = []string{".beads/*", "!.beads/config.yaml", "!.beads/metadata.json", ".claude/", ".codex/", ".gemini/", ".opencode/"}
 
 func usesCanonicalBeadsEntries(entries []string) bool {
 	for _, entry := range entries {
