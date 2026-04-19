@@ -1799,3 +1799,272 @@ func TestResolveOrderExecTarget_BoundRigDispatchesNormally(t *testing.T) {
 		t.Errorf("ScopeRoot = %q, want %q", target.ScopeRoot, "/home/user/frontend")
 	}
 }
+
+// --- rig-scoped store isolation tests (gc-mt1 / #137) ---
+
+// buildOrderDispatcherWithRigStore builds a dispatcher that uses separate
+// stores for rig-scoped orders. The rigStores map is keyed by rig name.
+func buildOrderDispatcherWithRigStore(aa []orders.Order, cityStore beads.Store, rigStores map[string]beads.Store, cfg *config.City) orderDispatcher {
+	var auto []orders.Order
+	for _, a := range aa {
+		if a.Gate != "manual" {
+			auto = append(auto, a)
+		}
+	}
+	if len(auto) == 0 {
+		return nil
+	}
+	return &memoryOrderDispatcher{
+		aa: auto,
+		storeFn: func() (beads.Store, error) {
+			return cityStore, nil
+		},
+		rigStoreFn: func(_ string, _ *config.City, rigName string) (beads.Store, error) {
+			s, ok := rigStores[rigName]
+			if !ok {
+				return nil, fmt.Errorf("rig store %q not found in test", rigName)
+			}
+			return s, nil
+		},
+		execRun: shellExecRunner,
+		rec:     events.Discard,
+		stderr:  &bytes.Buffer{},
+		cfg:     cfg,
+	}
+}
+
+func TestOrderDispatchCityOrderUsesCityStore(t *testing.T) {
+	cityStore := beads.NewMemStore()
+	rigStore := beads.NewMemStore()
+
+	aa := []orders.Order{{
+		Name:         "city-health",
+		Gate:         "cooldown",
+		Interval:     "1m",
+		Formula:      "test-formula",
+		Pool:         "worker",
+		FormulaLayer: sharedTestFormulaDir,
+	}}
+
+	ad := buildOrderDispatcherWithRigStore(aa, cityStore, map[string]beads.Store{"demo": rigStore}, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	cityBeads := trackingBeads(t, cityStore, "order-run:city-health")
+	if len(cityBeads) == 0 {
+		t.Fatal("expected beads in city store for city-scoped order")
+	}
+
+	rigBeads := trackingBeads(t, rigStore, "order-run:city-health")
+	if len(rigBeads) != 0 {
+		t.Errorf("expected no beads in rig store for city-scoped order, got %d", len(rigBeads))
+	}
+}
+
+func TestOrderDispatchRigOrderUsesRigStore(t *testing.T) {
+	cityStore := beads.NewMemStore()
+	rigStore := beads.NewMemStore()
+
+	aa := []orders.Order{{
+		Name:         "rig-health",
+		Gate:         "cooldown",
+		Interval:     "1m",
+		Formula:      "test-formula",
+		Pool:         "polecat",
+		Rig:          "demo",
+		FormulaLayer: sharedTestFormulaDir,
+	}}
+
+	ad := buildOrderDispatcherWithRigStore(aa, cityStore, map[string]beads.Store{"demo": rigStore}, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	rigBeads := trackingBeads(t, rigStore, "order-run:rig-health:rig:demo")
+	if len(rigBeads) == 0 {
+		t.Fatal("expected beads in rig store for rig-scoped order")
+	}
+
+	cityBeads := trackingBeads(t, cityStore, "order-run:rig-health:rig:demo")
+	if len(cityBeads) != 0 {
+		t.Errorf("expected no beads in city store for rig-scoped order, got %d", len(cityBeads))
+	}
+}
+
+func TestOrderDispatchMixedCityAndRigStoreIsolation(t *testing.T) {
+	cityStore := beads.NewMemStore()
+	rigStoreA := beads.NewMemStore()
+	rigStoreB := beads.NewMemStore()
+
+	aa := []orders.Order{
+		{
+			Name:         "city-check",
+			Gate:         "cooldown",
+			Interval:     "1m",
+			Formula:      "test-formula",
+			Pool:         "worker",
+			FormulaLayer: sharedTestFormulaDir,
+		},
+		{
+			Name:         "rig-check",
+			Gate:         "cooldown",
+			Interval:     "1m",
+			Formula:      "test-formula",
+			Pool:         "polecat",
+			Rig:          "rig-a",
+			FormulaLayer: sharedTestFormulaDir,
+		},
+		{
+			Name:         "rig-check",
+			Gate:         "cooldown",
+			Interval:     "1m",
+			Formula:      "test-formula",
+			Pool:         "polecat",
+			Rig:          "rig-b",
+			FormulaLayer: sharedTestFormulaDir,
+		},
+	}
+
+	rigStores := map[string]beads.Store{
+		"rig-a": rigStoreA,
+		"rig-b": rigStoreB,
+	}
+	ad := buildOrderDispatcherWithRigStore(aa, cityStore, rigStores, nil)
+	if ad == nil {
+		t.Fatal("expected non-nil dispatcher")
+	}
+
+	ad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(100 * time.Millisecond)
+
+	cityBeads := trackingBeads(t, cityStore, "order-run:city-check")
+	if len(cityBeads) == 0 {
+		t.Error("expected city-check beads in city store")
+	}
+	cityCross := trackingBeads(t, cityStore, "order-run:rig-check:rig:rig-a")
+	if len(cityCross) != 0 {
+		t.Errorf("city store has %d rig-a beads, want 0", len(cityCross))
+	}
+
+	rigABeads := trackingBeads(t, rigStoreA, "order-run:rig-check:rig:rig-a")
+	if len(rigABeads) == 0 {
+		t.Error("expected rig-check beads in rig-a store")
+	}
+
+	rigBBeads := trackingBeads(t, rigStoreB, "order-run:rig-check:rig:rig-b")
+	if len(rigBBeads) == 0 {
+		t.Error("expected rig-check beads in rig-b store")
+	}
+
+	rigACross := trackingBeads(t, rigStoreA, "order-run:rig-check:rig:rig-b")
+	if len(rigACross) != 0 {
+		t.Errorf("rig-a store has %d rig-b beads, want 0", len(rigACross))
+	}
+}
+
+func TestOrderExecEnvSetsBEADSDIRForRig(t *testing.T) {
+	target := execStoreTarget{
+		ScopeRoot: "/home/user/my-rig",
+		ScopeKind: "rig",
+		RigName:   "my-rig",
+	}
+	env := orderExecEnv("/city", target, orders.Order{Name: "deploy"})
+
+	var beadsDir string
+	for _, e := range env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			beadsDir = strings.TrimPrefix(e, "BEADS_DIR=")
+		}
+	}
+	want := filepath.Join("/home/user/my-rig", ".beads")
+	if beadsDir != want {
+		t.Errorf("BEADS_DIR = %q, want %q", beadsDir, want)
+	}
+}
+
+func TestOrderExecEnvNoBEADSDIRForCity(t *testing.T) {
+	target := execStoreTarget{
+		ScopeRoot: "/city",
+		ScopeKind: "city",
+	}
+	env := orderExecEnv("/city", target, orders.Order{Name: "check"})
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "BEADS_DIR=") {
+			t.Errorf("city-scoped exec should not set BEADS_DIR, got %q", e)
+		}
+	}
+}
+
+func TestResolveRigPath(t *testing.T) {
+	cfg := &config.City{
+		Rigs: []config.Rig{
+			{Name: "frontend", Path: "/abs/frontend"},
+			{Name: "backend", Path: "rigs/backend"},
+		},
+	}
+
+	p, err := resolveRigPath("/city", cfg, "frontend")
+	if err != nil {
+		t.Fatalf("resolveRigPath(frontend): %v", err)
+	}
+	if p != "/abs/frontend" {
+		t.Errorf("resolveRigPath(frontend) = %q, want %q", p, "/abs/frontend")
+	}
+
+	p, err = resolveRigPath("/city", cfg, "backend")
+	if err != nil {
+		t.Fatalf("resolveRigPath(backend): %v", err)
+	}
+	if p != filepath.Join("/city", "rigs/backend") {
+		t.Errorf("resolveRigPath(backend) = %q, want %q", p, filepath.Join("/city", "rigs/backend"))
+	}
+
+	_, err = resolveRigPath("/city", cfg, "unknown")
+	if err == nil {
+		t.Error("expected error for unknown rig")
+	}
+
+	_, err = resolveRigPath("/city", nil, "any")
+	if err == nil {
+		t.Error("expected error for nil config")
+	}
+}
+
+func TestStoreForOrderFallback(t *testing.T) {
+	cityStore := beads.NewMemStore()
+
+	m := &memoryOrderDispatcher{rigStoreFn: nil}
+	s, err := m.storeForOrder(cityStore, "/city", orders.Order{Rig: "demo"})
+	if err != nil {
+		t.Fatalf("storeForOrder: %v", err)
+	}
+	if s != cityStore {
+		t.Error("expected city store when rigStoreFn is nil")
+	}
+
+	called := false
+	m2 := &memoryOrderDispatcher{
+		rigStoreFn: func(_ string, _ *config.City, _ string) (beads.Store, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	s2, err := m2.storeForOrder(cityStore, "/city", orders.Order{Name: "city-order"})
+	if err != nil {
+		t.Fatalf("storeForOrder (city): %v", err)
+	}
+	if s2 != cityStore {
+		t.Error("expected city store for city-scoped order")
+	}
+	if called {
+		t.Error("rigStoreFn should not be called for city-scoped orders")
+	}
+}

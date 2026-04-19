@@ -45,10 +45,15 @@ func shellExecRunner(ctx context.Context, command, dir string, env []string) ([]
 
 type orderStoreFunc func() (beads.Store, error)
 
+// rigStoreFunc resolves a beads.Store scoped to a specific rig. The
+// cityPath and rig name are used to locate the rig's .beads/ directory.
+type rigStoreFunc func(cityPath string, cfg *config.City, rigName string) (beads.Store, error)
+
 // memoryOrderDispatcher is the production implementation.
 type memoryOrderDispatcher struct {
 	aa         []orders.Order
 	storeFn    orderStoreFunc
+	rigStoreFn rigStoreFunc
 	ep         events.Provider
 	execRun    ExecRunner
 	rec        events.Recorder
@@ -97,6 +102,7 @@ func buildOrderDispatcher(cityPath string, cfg *config.City, rec events.Recorder
 		storeFn: func() (beads.Store, error) {
 			return openStoreAtForCity(cityPath, cityPath)
 		},
+		rigStoreFn: defaultRigStoreFunc,
 		ep:         ep,
 		execRun:    shellExecRunner,
 		rec:        rec,
@@ -107,20 +113,56 @@ func buildOrderDispatcher(cityPath string, cfg *config.City, rec events.Recorder
 	}
 }
 
+
+// defaultRigStoreFunc is the production rigStoreFunc. It resolves the
+// rig path via config and opens a store scoped to the rig's directory.
+func defaultRigStoreFunc(cityPath string, cfg *config.City, rigName string) (beads.Store, error) {
+	rigPath, err := resolveRigPath(cityPath, cfg, rigName)
+	if err != nil {
+		return nil, err
+	}
+	return openStoreAtForCity(rigPath, cityPath)
+}
+
+// resolveRigPath resolves the absolute filesystem path for a named rig.
+// Ensures rig paths are resolved to absolute form before lookup.
+func resolveRigPath(cityPath string, cfg *config.City, rigName string) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("rig-scoped order for %q requires city config", rigName)
+	}
+	resolveRigPaths(cityPath, cfg.Rigs)
+	rig, ok := rigByName(cfg, rigName)
+	if !ok {
+		return "", fmt.Errorf("rig %q not found in %s", rigName, filepath.Join(cityPath, "city.toml"))
+	}
+	return rig.Path, nil
+}
+
+// storeForOrder returns the appropriate store for an order. For rig-scoped
+// orders (a.Rig != ""), it resolves a store scoped to the rig's .beads/
+// directory. For city-scoped orders, it returns the city store. Falls back
+// to the city store when rigStoreFn is nil (e.g. in legacy test helpers).
+func (m *memoryOrderDispatcher) storeForOrder(cityStore beads.Store, cityPath string, a orders.Order) (beads.Store, error) {
+	if strings.TrimSpace(a.Rig) == "" || m.rigStoreFn == nil {
+		return cityStore, nil
+	}
+	return m.rigStoreFn(cityPath, m.cfg, a.Rig)
+}
+
 func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, now time.Time) {
 	// Skip all order dispatch when the city is suspended.
 	if m.cfg != nil && citySuspended(m.cfg) {
 		return
 	}
 
-	store, err := m.storeFn()
+	cityStore, err := m.storeFn()
 	if err != nil {
 		fmt.Fprintf(m.stderr, "gc: order dispatch: opening store: %v\n", err) //nolint:errcheck // best-effort stderr
 		return
 	}
 
-	lastRunFn := orderLastRunFn(store)
-	cursorFn := bdCursorFunc(store)
+	lastRunFn := orderLastRunFn(cityStore)
+	cursorFn := bdCursorFunc(cityStore)
 
 	for _, a := range m.aa {
 		result := orders.CheckGate(a, now, lastRunFn, m.ep, cursorFn)
@@ -130,6 +172,17 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 
 		// Skip orders targeting suspended rigs.
 		if m.orderRigSuspended(a) {
+			continue
+		}
+
+		// Resolve the correct store for this order: rig-scoped orders
+		// use the rig's .beads/ directory, city-scoped orders use the
+		// city store. This prevents rig beads from accumulating in the
+		// city store as orphans.
+		store, err := m.storeForOrder(cityStore, cityPath, a)
+		if err != nil {
+			scoped := a.ScopedName()
+			fmt.Fprintf(m.stderr, "gc: order dispatch: resolving store for %s: %v\n", scoped, err) //nolint:errcheck
 			continue
 		}
 
@@ -262,6 +315,7 @@ func orderExecEnv(cityPath string, target execStoreTarget, a orders.Order) []str
 	if target.ScopeKind == "rig" {
 		env["GC_RIG"] = target.RigName
 		env["GC_RIG_ROOT"] = target.ScopeRoot
+		env["BEADS_DIR"] = filepath.Join(target.ScopeRoot, ".beads")
 	}
 	if a.Source != "" {
 		env["ORDER_DIR"] = filepath.Dir(a.Source)
