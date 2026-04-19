@@ -458,11 +458,14 @@ func mirrorBeadsDoltEnv(env map[string]string) {
 	}
 	if host := strings.TrimSpace(env["GC_DOLT_HOST"]); host != "" {
 		env["BEADS_DOLT_SERVER_HOST"] = host
+		env["BEADS_DOLT_HOST"] = host // bd 1.x reads this name for env-based host override
 	} else {
 		delete(env, "BEADS_DOLT_SERVER_HOST")
+		delete(env, "BEADS_DOLT_HOST")
 	}
 	if port := strings.TrimSpace(env["GC_DOLT_PORT"]); port != "" {
 		env["BEADS_DOLT_SERVER_PORT"] = port
+		env["BEADS_DOLT_PORT"] = port
 	} else {
 		// Keep the key present so child bd processes cannot inherit a stale
 		// BEADS_DOLT_SERVER_PORT from an ambient parent environment.

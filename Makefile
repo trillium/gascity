@@ -12,7 +12,7 @@ BUILD_DIR  := bin
 INSTALL_DIR := $(BIN_DIR)
 
 # Version metadata injected via ldflags.
-VERSION    := $(shell tag=$$(git describe --tags --exact-match 2>/dev/null || true); if [ -n "$$tag" ]; then printf '%s' "$$tag" | sed 's/^v//'; else echo "dev"; fi)
+VERSION    := $(shell base=$$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null | sed 's/^v//' || echo "dev"); echo "$${base}.trillium")
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 

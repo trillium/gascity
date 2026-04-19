@@ -328,9 +328,24 @@ func buildPreparedStart(
 		agentCfg.WorkDir = wd
 	}
 	// Second-pass expansion: resolve {{.Session}} and {{.Issue}} placeholders
-	// that were deferred from the config-time work_dir template expansion.
-	// This is a no-op when neither placeholder appears in agentCfg.WorkDir.
+	// that were deferred from the config-time template expansion. Applied to
+	// WorkDir, PreStart, and SessionSetup so {{.WorkDir}} in those commands
+	// reflects the final resolved path after {{.Session}} is substituted.
 	agentCfg.WorkDir = workdirutil.ExpandWithSession(agentCfg.WorkDir, session.ID, issueID)
+	for i, cmd := range agentCfg.PreStart {
+		agentCfg.PreStart[i] = workdirutil.ExpandWithSession(cmd, session.ID, issueID)
+	}
+	for i, cmd := range agentCfg.SessionSetup {
+		agentCfg.SessionSetup[i] = workdirutil.ExpandWithSession(cmd, session.ID, issueID)
+	}
+	// Inject issue ID into env so pre_start/session_setup scripts can reference
+	// the assigned work bead (e.g. to derive a branch name slug from its title).
+	if issueID != "" {
+		if agentCfg.Env == nil {
+			agentCfg.Env = make(map[string]string)
+		}
+		agentCfg.Env["GC_ISSUE"] = issueID
+	}
 	if session.Metadata["session_key"] == "" && tp.ResolvedProvider != nil && tp.ResolvedProvider.SessionIDFlag != "" {
 		sessionKey, err := sessionpkg.GenerateSessionKey()
 		if err != nil {
