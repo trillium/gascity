@@ -194,7 +194,7 @@ func doBeadsCityEndpoint(fs fsys.FS, cityPath string, opts cityEndpointOptions, 
 		fmt.Fprintf(stderr, "%s: snapshot canonical files: %v\n", name, err) //nolint:errcheck
 		return 1
 	}
-	if err := ensureCanonicalScopeMetadataIfPresent(fs, cityPath); err != nil {
+	if err := ensureCanonicalScopeMetadataIfPresent(fs, cityPath, targetState); err != nil {
 		writeCityEndpointRollbackError(fs, stderr, snapshots, name, "canonicalizing metadata", err)
 		return 1
 	}
@@ -206,7 +206,7 @@ func doBeadsCityEndpoint(fs fsys.FS, cityPath string, opts cityEndpointOptions, 
 		if !plan.Update {
 			continue
 		}
-		if err := ensureCanonicalScopeMetadataIfPresent(fs, plan.Rig.Path); err != nil {
+		if err := ensureCanonicalScopeMetadataIfPresent(fs, plan.Rig.Path, plan.Target); err != nil {
 			writeCityEndpointRollbackError(fs, stderr, snapshots, name, "canonicalizing inherited rig metadata", err)
 			return 1
 		}
