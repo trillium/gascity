@@ -1177,3 +1177,99 @@ func TestScaledPool_NotAffectedByRunningOverride(t *testing.T) {
 	})
 	assertAsleep(t, result, "polecat-mc-1")
 }
+
+// ---------------------------------------------------------------------------
+// On-demand hot-idle state (#489)
+// ---------------------------------------------------------------------------
+
+func TestNamedOnDemand_BackendReady_ReportsHotIdle(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/refinery"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/refinery", Template: "hello-world/refinery", Mode: "on_demand"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--refinery", Template: "hello-world/refinery",
+			State: "asleep", NamedIdentity: "hello-world/refinery", BackendReady: true,
+		}},
+		Now: now,
+	})
+	assertAsleep(t, result, "hello-world--refinery")
+	assertReason(t, result, "hello-world--refinery", "on-demand:hot-idle")
+}
+
+func TestNamedOnDemand_BackendNotReady_NoHotIdleReason(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/refinery"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/refinery", Template: "hello-world/refinery", Mode: "on_demand"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--refinery", Template: "hello-world/refinery",
+			State: "asleep", NamedIdentity: "hello-world/refinery",
+		}},
+		Now: now,
+	})
+	assertAsleep(t, result, "hello-world--refinery")
+	if d := result["hello-world--refinery"]; d.Reason == "on-demand:hot-idle" {
+		t.Errorf("reason should not be hot-idle when backend is not ready")
+	}
+}
+
+func TestNamedOnDemand_BackendReady_Running_StaysRunning(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/refinery"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/refinery", Template: "hello-world/refinery", Mode: "on_demand"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--refinery", Template: "hello-world/refinery",
+			State: "active", NamedIdentity: "hello-world/refinery", BackendReady: true,
+		}},
+		RunningSessions: map[string]bool{"hello-world--refinery": true},
+		Now:             now,
+	})
+	assertAwake(t, result, "hello-world--refinery")
+	assertReason(t, result, "hello-world--refinery", "on-demand:running")
+}
+
+func TestNamedOnDemand_BackendReady_WithWork_WakesNormally(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/refinery"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/refinery", Template: "hello-world/refinery", Mode: "on_demand"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--refinery", Template: "hello-world/refinery",
+			State: "asleep", NamedIdentity: "hello-world/refinery", BackendReady: true,
+		}},
+		WorkBeads: []AwakeWorkBead{{ID: "hw-1", Assignee: "mc-1", Status: "open"}},
+		Now:       now,
+	})
+	assertAwake(t, result, "hello-world--refinery")
+	assertReason(t, result, "hello-world--refinery", "assigned-work")
+}
+
+func TestNamedOnDemand_BackendReady_Drained_NoHotIdle(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/refinery"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/refinery", Template: "hello-world/refinery", Mode: "on_demand"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--refinery", Template: "hello-world/refinery",
+			State: "drained", NamedIdentity: "hello-world/refinery", BackendReady: true, Drained: true,
+		}},
+		Now: now,
+	})
+	assertAsleep(t, result, "hello-world--refinery")
+	if d := result["hello-world--refinery"]; d.Reason == "on-demand:hot-idle" {
+		t.Errorf("drained session should not report hot-idle, got reason=%q", d.Reason)
+	}
+}
+
+func TestNamedAlways_BackendReady_NoHotIdle(t *testing.T) {
+	result := ComputeAwakeSet(AwakeInput{
+		Agents:        []AwakeAgent{{QualifiedName: "hello-world/mayor"}},
+		NamedSessions: []AwakeNamedSession{{Identity: "hello-world/mayor", Template: "hello-world/mayor", Mode: "always"}},
+		SessionBeads: []AwakeSessionBead{{
+			ID: "mc-1", SessionName: "hello-world--mayor", Template: "hello-world/mayor",
+			State: "active", NamedIdentity: "hello-world/mayor", BackendReady: true,
+		}},
+		Now: now,
+	})
+	assertAwake(t, result, "hello-world--mayor")
+	if d := result["hello-world--mayor"]; d.Reason == "on-demand:hot-idle" {
+		t.Errorf("always-mode session should not report hot-idle")
+	}
+}
