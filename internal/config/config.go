@@ -1772,10 +1772,14 @@ func legacyWorkflowControlQualifiedName(target string) string {
 // EffectiveSlingQuery returns the sling query command template for this agent.
 // The template uses {} as a placeholder for the bead ID.
 // If SlingQuery is set, returns it as-is. Otherwise returns the default:
-// "bd update {} --set-metadata gc.routed_to=<template>"
+// "bd update {} --set-metadata gc.routed_to=<template> --assignee \"\""
 //
 // All agents use metadata-based routing. The reconciler and scale_check
 // handle session creation; sling just stamps the target template.
+// The assignee is cleared so pool work queries using --unassigned can
+// discover the bead. Without this, beads created with a pre-existing
+// assignee (e.g., the user who filed them) would be invisible to pool
+// agents whose work_query and scale_check filter on --unassigned.
 func (a *Agent) EffectiveSlingQuery() string {
 	if a.SlingQuery != "" {
 		return a.SlingQuery
@@ -1786,8 +1790,10 @@ func (a *Agent) EffectiveSlingQuery() string {
 // DefaultSlingQuery returns the built-in metadata-routing sling query for
 // this agent. Callers outside config should prefer this helper over rebuilding
 // the command string to preserve the bd boundary invariant.
+// --assignee "" clears any pre-existing assignee so pool agents whose
+// work_query and scale_check filter on --unassigned can see slung beads.
 func (a *Agent) DefaultSlingQuery() string {
-	return "bd update {} --set-metadata gc.routed_to=" + a.QualifiedName()
+	return `bd update {} --set-metadata gc.routed_to=` + a.QualifiedName() + ` --assignee ""`
 }
 
 // EffectiveDefaultSlingFormula returns the default sling formula for
