@@ -192,6 +192,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newBdStoreBridgeCmd(stdout, stderr),
 		newDoltConfigCmd(stdout, stderr),
 		newDoltStateCmd(stdout, stderr),
+		newBootCheckCmd(stdout, stderr),
 	)
 	// gen-doc needs the root command to walk the tree; add after construction.
 	root.AddCommand(newGenDocCmd(stdout, stderr, root))
