@@ -424,6 +424,12 @@ func cmdInitFromTOMLFileWithOptions(fs fsys.FS, tomlSrc, cityPath string, stdout
 		return 1
 	}
 
+	// Write .gitignore entries for city-managed directories.
+	if err := ensureGitignoreEntries(fs, cityPath, cityGitignoreEntries); err != nil {
+		fmt.Fprintf(stderr, "gc init: writing .gitignore: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
 	fmt.Fprintf(stdout, "Welcome to Gas City!\n")                                           //nolint:errcheck // best-effort stdout
 	fmt.Fprintf(stdout, "Initialized city %q from %s.\n", cityName, filepath.Base(tomlSrc)) //nolint:errcheck // best-effort stdout
 	return finalizeInit(cityPath, stdout, stderr, initFinalizeOptions{
@@ -515,6 +521,12 @@ func doInit(fs fsys.FS, cityPath string, wiz wizardConfig, stdout, stderr io.Wri
 	logInitProgress(stdout, 5, "Writing city configuration")
 	if err := fs.WriteFile(tomlPath, content, 0o644); err != nil {
 		fmt.Fprintf(stderr, "gc init: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
+
+	// Write .gitignore entries for city-managed directories.
+	if err := ensureGitignoreEntries(fs, cityPath, cityGitignoreEntries); err != nil {
+		fmt.Fprintf(stderr, "gc init: writing .gitignore: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
 
@@ -700,6 +712,12 @@ func doInitFromDirWithOptions(srcDir, cityPath string, stdout, stderr io.Writer,
 		if rsErr := ResolveScripts(cityPath, expandedCfg.ScriptLayers.City); rsErr != nil {
 			fmt.Fprintf(stderr, "gc init: resolving scripts: %v\n", rsErr) //nolint:errcheck // best-effort stderr
 		}
+	}
+
+	// Write .gitignore entries for city-managed directories.
+	if err := ensureGitignoreEntries(fsys.OSFS{}, cityPath, cityGitignoreEntries); err != nil {
+		fmt.Fprintf(stderr, "gc init: writing .gitignore: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
 	}
 
 	fmt.Fprintln(stdout, "Welcome to Gas City!")                                           //nolint:errcheck // best-effort stdout

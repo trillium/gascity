@@ -330,6 +330,11 @@ func doRigAdd(fs fsys.FS, cityPath, rigPath, include, nameOverride string, start
 		fmt.Fprintf(stderr, "gc rig add: warning: writing .beads/.env: %v\n", err) //nolint:errcheck // best-effort stderr
 	}
 
+	// Write .gitignore entries for rig-managed directories.
+	if err := ensureGitignoreEntries(fs, rigPath, rigGitignoreEntries); err != nil {
+		fmt.Fprintf(stderr, "gc rig add: writing .gitignore: %v\n", err) //nolint:errcheck // best-effort stderr
+	}
+
 	// Poke controller after config is committed so it picks up
 	// deferred beads init and implicit agents for the new rig.
 	_ = pokeController(cityPath)
