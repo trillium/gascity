@@ -30,6 +30,7 @@ package formula
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Type categorizes formulas by their purpose.
@@ -273,6 +274,12 @@ type Step struct {
 	// The original step becomes a stable logical container, and the actionable
 	// work is emitted as first-class graph steps.
 	Retry *RetrySpec `json:"retry,omitempty" toml:"retry,omitempty"`
+
+	// Timeout is the maximum duration for this step's command execution.
+	// Applies to ralph check scripts and gate condition scripts.
+	// Format: Go duration string (e.g., "5m", "2m30s", "300s").
+	// Overrides the default gate timeout (5m) for this step.
+	Timeout string `json:"timeout,omitempty" toml:"timeout,omitempty"`
 
 	// Source tracing fields: track where this step came from.
 	// These are set during parsing/transformation and copied to Issues during cooking.
@@ -635,6 +642,13 @@ func (f *Formula) Validate() error {
 			errs = append(errs, fmt.Sprintf("%s (%s): priority must be 0-4", prefix, step.ID))
 		}
 
+		// Validate timeout format
+		if step.Timeout != "" {
+			if _, err := time.ParseDuration(step.Timeout); err != nil {
+				errs = append(errs, fmt.Sprintf("%s (%s): invalid timeout %q: %v", prefix, step.ID, step.Timeout, err))
+			}
+		}
+
 		if step.Ralph != nil {
 			validateRalph(step.Ralph, &errs, fmt.Sprintf("%s (%s)", prefix, step.ID), step)
 		}
@@ -734,6 +748,13 @@ func collectChildIDs(children []*Step, idLocations map[string]string, errs *[]st
 		// Validate priority range for children
 		if child.Priority != nil && (*child.Priority < 0 || *child.Priority > 4) {
 			*errs = append(*errs, fmt.Sprintf("%s (%s): priority must be 0-4", childPrefix, child.ID))
+		}
+
+		// Validate timeout format for children
+		if child.Timeout != "" {
+			if _, err := time.ParseDuration(child.Timeout); err != nil {
+				*errs = append(*errs, fmt.Sprintf("%s (%s): invalid timeout %q: %v", childPrefix, child.ID, child.Timeout, err))
+			}
 		}
 
 		if child.Ralph != nil {

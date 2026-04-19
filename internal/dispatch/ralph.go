@@ -166,6 +166,16 @@ func runRalphCheck(store beads.Store, bead, subject beads.Bead, attempt int, opt
 	}
 
 	timeout := convergence.DefaultGateTimeout
+	// Per-step timeout (from formula step.timeout) applies first as a
+	// general override. The check-specific gc.check_timeout (from
+	// ralph.check.timeout) takes precedence if also set.
+	if raw := bead.Metadata["gc.step_timeout"]; raw != "" {
+		parsed, parseErr := time.ParseDuration(raw)
+		if parseErr != nil {
+			return convergence.GateResult{}, fmt.Errorf("%s: parsing gc.step_timeout %q: %w", bead.ID, raw, parseErr)
+		}
+		timeout = parsed
+	}
 	if raw := bead.Metadata["gc.check_timeout"]; raw != "" {
 		parsed, parseErr := time.ParseDuration(raw)
 		if parseErr != nil {

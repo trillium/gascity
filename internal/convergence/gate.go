@@ -6,7 +6,9 @@ import (
 )
 
 // DefaultGateTimeout is the default timeout for gate condition scripts.
-const DefaultGateTimeout = 60 * time.Second
+// Set to 5 minutes to accommodate build/test commands (e.g., make check)
+// that commonly exceed the previous 60-second default.
+const DefaultGateTimeout = 5 * time.Minute
 
 // MaxGateRetries is the maximum number of retries for gate_timeout_action=retry.
 const MaxGateRetries = 3
