@@ -1354,15 +1354,19 @@ func (a *Agent) EffectiveWorkQuery() string {
 // EffectiveSlingQuery returns the sling query command template for this agent.
 // The template uses {} as a placeholder for the bead ID.
 // If SlingQuery is set, returns it as-is. Otherwise returns the default:
-// "bd update {} --set-metadata gc.routed_to=<template>"
+// "bd update {} --set-metadata gc.routed_to=<template> --assignee \"\""
 //
 // All agents use metadata-based routing. The reconciler and scale_check
 // handle session creation; sling just stamps the target template.
+// The assignee is cleared so pool work queries using --unassigned can
+// discover the bead. Without this, beads created with a pre-existing
+// assignee (e.g., the user who filed them) would be invisible to pool
+// agents whose work_query and scale_check filter on --unassigned.
 func (a *Agent) EffectiveSlingQuery() string {
 	if a.SlingQuery != "" {
 		return a.SlingQuery
 	}
-	return "bd update {} --set-metadata gc.routed_to=" + a.QualifiedName()
+	return `bd update {} --set-metadata gc.routed_to=` + a.QualifiedName() + ` --assignee ""`
 }
 
 // DrainTimeoutDuration returns the drain timeout as a time.Duration.
