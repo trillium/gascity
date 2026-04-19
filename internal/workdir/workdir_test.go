@@ -76,6 +76,118 @@ func TestResolveWorkDirPathStrictRejectsInvalidTemplate(t *testing.T) {
 	}
 }
 
+func TestExpandWithSessionExpandsSessionPlaceholder(t *testing.T) {
+	got := ExpandWithSession("/worktrees/{{.Session}}", "ct-wm5", "")
+	want := "/worktrees/ct-wm5"
+	if got != want {
+		t.Fatalf("ExpandWithSession() = %q, want %q", got, want)
+	}
+}
+
+func TestExpandWithSessionExpandsIssuePlaceholder(t *testing.T) {
+	got := ExpandWithSession("/worktrees/{{.Issue}}", "", "ba-56ry")
+	want := "/worktrees/ba-56ry"
+	if got != want {
+		t.Fatalf("ExpandWithSession() = %q, want %q", got, want)
+	}
+}
+
+func TestExpandWithSessionExpandsBothPlaceholders(t *testing.T) {
+	got := ExpandWithSession("/worktrees/{{.Session}}/{{.Issue}}", "ct-wm5", "ba-56ry")
+	want := "/worktrees/ct-wm5/ba-56ry"
+	if got != want {
+		t.Fatalf("ExpandWithSession() = %q, want %q", got, want)
+	}
+}
+
+func TestExpandWithSessionIsNoOpWhenNoPlaceholders(t *testing.T) {
+	spec := "/worktrees/myrig/agent"
+	got := ExpandWithSession(spec, "ct-wm5", "ba-56ry")
+	if got != spec {
+		t.Fatalf("ExpandWithSession() = %q, want %q (unchanged)", got, spec)
+	}
+}
+
+func TestExpandWithSessionIsNoOpOnEmptySpec(t *testing.T) {
+	got := ExpandWithSession("", "ct-wm5", "ba-56ry")
+	if got != "" {
+		t.Fatalf("ExpandWithSession() = %q, want empty string", got)
+	}
+}
+
+func TestExpandWithSessionEmptySessionIDExpandsToEmpty(t *testing.T) {
+	got := ExpandWithSession("/worktrees/{{.Session}}", "", "")
+	want := "/worktrees/"
+	if got != want {
+		t.Fatalf("ExpandWithSession() = %q, want %q", got, want)
+	}
+}
+
+func TestExpandTemplateStrictPreservesSessionPlaceholderForSecondPass(t *testing.T) {
+	cityPath := t.TempDir()
+	cityName := "gastown"
+	rigPath := filepath.Join(cityPath, "repos", "demo")
+	ctx := PathContextForQualifiedName(cityPath, cityName, "demo/refinery", config.Agent{
+		Name: "refinery",
+		Dir:  "demo",
+	}, []config.Rig{{Name: "demo", Path: rigPath}})
+
+	// {{.Session}} should survive the first pass as-is.
+	spec := "{{.RigRoot}}/worktrees/{{.Session}}"
+	expanded, err := ExpandTemplateStrict(spec, ctx)
+	if err != nil {
+		t.Fatalf("ExpandTemplateStrict() unexpected error: %v", err)
+	}
+	// RigRoot should be expanded; {{.Session}} should be preserved.
+	want := rigPath + "/worktrees/{{.Session}}"
+	if expanded != want {
+		t.Fatalf("ExpandTemplateStrict() = %q, want %q", expanded, want)
+	}
+
+	// Second pass should then expand {{.Session}}.
+	final := ExpandWithSession(expanded, "ct-wm5", "")
+	wantFinal := rigPath + "/worktrees/ct-wm5"
+	if final != wantFinal {
+		t.Fatalf("ExpandWithSession() after first pass = %q, want %q", final, wantFinal)
+	}
+}
+
+func TestExpandTemplateStrictStillRejectsUnknownNonDeferredKeys(t *testing.T) {
+	cityPath := t.TempDir()
+	ctx := PathContextForQualifiedName(cityPath, "gastown", "demo/refinery", config.Agent{
+		Name: "refinery",
+		Dir:  "demo",
+	}, nil)
+
+	// {{.RigName}} is not a valid PathContext field — should still fail.
+	_, err := ExpandTemplateStrict("{{.RigName}}/worktrees", ctx)
+	if err == nil {
+		t.Fatal("ExpandTemplateStrict() error = nil, want error for unknown key")
+	}
+}
+
+func TestResolveWorkDirPathStrictWithSessionPlaceholder(t *testing.T) {
+	cityPath := t.TempDir()
+	cityName := "gastown"
+	rigPath := filepath.Join(cityPath, "repos", "demo")
+
+	// A config work_dir with {{.Session}} should succeed at first pass,
+	// returning a path that still contains the {{.Session}} marker.
+	path, err := ResolveWorkDirPathStrict(cityPath, cityName, "demo/refinery", config.Agent{
+		Name:    "refinery",
+		Dir:     "demo",
+		WorkDir: "{{.RigRoot}}/worktrees/{{.Session}}",
+	}, []config.Rig{{Name: "demo", Path: rigPath}})
+	if err != nil {
+		t.Fatalf("ResolveWorkDirPathStrict() unexpected error: %v", err)
+	}
+	// RigRoot is absolute, so ResolveDirPath returns it directly.
+	want := rigPath + "/worktrees/{{.Session}}"
+	if path != want {
+		t.Fatalf("ResolveWorkDirPathStrict() = %q, want %q", path, want)
+	}
+}
+
 func TestConfiguredRigNameMatchesSymlinkAliasPath(t *testing.T) {
 	root := t.TempDir()
 	realRoot := filepath.Join(root, "real")

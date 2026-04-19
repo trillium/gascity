@@ -1181,6 +1181,15 @@ func clearMissingIdleProbes(dt *drainTracker, beadByID map[string]*beads.Bead) {
 // in the worktree that the previous session (or this session's prior run)
 // created, without any prompt-side logic.
 func resolveTaskWorkDir(store beads.Store, assignees ...string) string {
+	wd, _ := resolveTaskContext(store, assignees...)
+	return wd
+}
+
+// resolveTaskContext is like resolveTaskWorkDir but also returns the ID of the
+// task bead whose work_dir was matched. The bead ID is used to populate the
+// {{.Issue}} template variable in work_dir expansions. Both return values are
+// empty when no matching task bead is found.
+func resolveTaskContext(store beads.Store, assignees ...string) (workDir, issueID string) {
 	seen := make(map[string]bool, len(assignees))
 	for _, assignee := range assignees {
 		assignee = strings.TrimSpace(assignee)
@@ -1200,12 +1209,12 @@ func resolveTaskWorkDir(store beads.Store, assignees ...string) string {
 			wd := b.Metadata["work_dir"]
 			if wd != "" {
 				if info, err := os.Stat(wd); err == nil && info.IsDir() {
-					return wd
+					return wd, b.ID
 				}
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // resolveSessionCommand returns the command to use when starting a session.
