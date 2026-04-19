@@ -120,6 +120,12 @@ type Handler struct {
 
 // HandleWispClosed processes a wisp_closed event for a convergence root bead.
 // This is the core 9-step algorithm from the spec.
+//
+// Crash safety: the next wisp is speculatively poured BEFORE gate evaluation
+// (step 3b). If the outcome is terminal or waiting_manual, the speculative
+// wisp is burned. If the process crashes after the pour but before the burn,
+// the reconciler finds the speculative wisp via pending_next_wisp or
+// FindByIdempotencyKey and adopts it.
 func (h *Handler) HandleWispClosed(ctx context.Context, rootBeadID, wispID string) (HandlerResult, error) {
 	now := h.clock()
 
@@ -177,6 +183,28 @@ func (h *Handler) HandleWispClosed(ctx context.Context, rootBeadID, wispID strin
 
 	maxIterations, _ := DecodeInt(meta[FieldMaxIterations])
 
+	// Step 3b: Speculative pour — create the next wisp BEFORE gate evaluation
+	// so that a crash between gate eval and commit cannot break the chain.
+	// If the outcome is terminal or waiting_manual, we burn this wisp.
+	var speculativeWispID string
+	if wispIteration < maxIterations {
+		nextIter := wispIteration + 1
+		nextKey := IdempotencyKey(rootBeadID, nextIter)
+		formula := meta[FieldFormula]
+		vars := ExtractVars(meta)
+		evaluatePrompt := meta[FieldEvaluatePrompt]
+		speculativeWispID, err = h.Store.PourWisp(rootBeadID, formula, nextKey, vars, evaluatePrompt)
+		if err != nil {
+			existingID, found, lookupErr := h.Store.FindByIdempotencyKey(nextKey)
+			if lookupErr == nil && found {
+				speculativeWispID = existingID
+			}
+		}
+		if speculativeWispID != "" {
+			_ = h.Store.SetMetadata(rootBeadID, FieldPendingNextWisp, speculativeWispID)
+		}
+	}
+
 	// Parse gate config.
 	gateConfig, err := ParseGateConfig(meta)
 	if err != nil {
@@ -210,12 +238,14 @@ func (h *Handler) HandleWispClosed(ctx context.Context, rootBeadID, wispID strin
 	} else {
 		// Manual mode: no gate evaluation, transition to waiting_manual.
 		if gateConfig.Mode == GateModeManual {
+			h.burnSpeculativeWisp(rootBeadID, speculativeWispID)
 			return h.transitionToWaitingManual(rootBeadID, wispID, wispIteration,
 				gateConfig, GateResult{}, WaitManual, "", meta, now)
 		}
 
 		// Hybrid mode with no condition: fallback to manual.
 		if gateConfig.Mode == GateModeHybrid && HybridNeedsManual(gateConfig) {
+			h.burnSpeculativeWisp(rootBeadID, speculativeWispID)
 			return h.transitionToWaitingManual(rootBeadID, wispID, wispIteration,
 				gateConfig, GateResult{}, WaitHybridNoCondition, "", meta, now)
 		}
@@ -250,6 +280,7 @@ func (h *Handler) HandleWispClosed(ctx context.Context, rootBeadID, wispID strin
 	// Step 7: Prepare outcome.
 	// Check for timeout with manual action first.
 	if gateResult.Outcome == GateTimeout && gateConfig.TimeoutAction == TimeoutActionManual {
+		h.burnSpeculativeWisp(rootBeadID, speculativeWispID)
 		return h.transitionToWaitingManual(rootBeadID, wispID, wispIteration,
 			gateConfig, gateResult, WaitTimeout, gateResult.Outcome, meta, now)
 	}
@@ -272,11 +303,12 @@ func (h *Handler) HandleWispClosed(ctx context.Context, rootBeadID, wispID strin
 	}
 
 	if !isTerminal {
-		// Iterate: clear verdict and pour next wisp.
-		return h.iterate(ctx, rootBeadID, wispID, wispIteration, gateConfig, gateResult, meta, now)
+		// Iterate: clear verdict and use speculatively poured wisp.
+		return h.iterate(ctx, rootBeadID, wispID, wispIteration, gateConfig, gateResult, meta, now, speculativeWispID)
 	}
 
-	// Terminal transition.
+	// Terminal transition — burn the speculative wisp if one was poured.
+	h.burnSpeculativeWisp(rootBeadID, speculativeWispID)
 	return h.terminate(rootBeadID, wispID, wispIteration, gateConfig, gateResult,
 		terminalReason, "controller", globalIteration, meta, now)
 }
@@ -366,7 +398,9 @@ func (h *Handler) transitionToWaitingManual(
 	}, nil
 }
 
-// iterate clears verdict and pours the next convergence wisp.
+// iterate clears verdict and adopts the speculatively poured wisp (or pours
+// a new one as fallback). The speculative wisp was created in step 3b of
+// HandleWispClosed before gate evaluation, ensuring crash safety.
 func (h *Handler) iterate(
 	_ context.Context,
 	rootBeadID, wispID string,
@@ -375,6 +409,7 @@ func (h *Handler) iterate(
 	gateResult GateResult,
 	meta map[string]string,
 	now time.Time,
+	speculativeWispID string,
 ) (HandlerResult, error) {
 	// Clear verdict for next iteration (only if verdict belongs to this wisp).
 	if meta[FieldAgentVerdictWisp] == wispID {
@@ -386,24 +421,29 @@ func (h *Handler) iterate(
 		}
 	}
 
-	// Pour next wisp.
+	// Adopt speculatively poured wisp, or pour a new one as fallback.
 	nextIteration := iteration + 1
 	nextKey := IdempotencyKey(rootBeadID, nextIteration)
-	formula := meta[FieldFormula]
-	vars := ExtractVars(meta)
-	evaluatePrompt := meta[FieldEvaluatePrompt] // may be empty for default
 
-	nextWispID, err := h.Store.PourWisp(rootBeadID, formula, nextKey, vars, evaluatePrompt)
-	if err != nil {
-		// Sling failure: check if wisp was created despite the error.
-		existingID, found, lookupErr := h.Store.FindByIdempotencyKey(nextKey)
-		if lookupErr == nil && found {
-			// Wisp was created — adopt it.
-			nextWispID = existingID
-		} else {
-			// Genuine sling failure: transition to waiting_manual.
-			return h.handleSlingFailure(rootBeadID, wispID, iteration,
-				gateConfig, gateResult, meta, now)
+	var nextWispID string
+	if speculativeWispID != "" {
+		// Speculative wisp was pre-poured in step 3b — adopt it.
+		nextWispID = speculativeWispID
+	} else {
+		// Fallback: pour now (e.g., at max iterations boundary or error).
+		formula := meta[FieldFormula]
+		vars := ExtractVars(meta)
+		evaluatePrompt := meta[FieldEvaluatePrompt]
+		var pourErr error
+		nextWispID, pourErr = h.Store.PourWisp(rootBeadID, formula, nextKey, vars, evaluatePrompt)
+		if pourErr != nil {
+			existingID, found, lookupErr := h.Store.FindByIdempotencyKey(nextKey)
+			if lookupErr == nil && found {
+				nextWispID = existingID
+			} else {
+				return h.handleSlingFailure(rootBeadID, wispID, iteration,
+					gateConfig, gateResult, meta, now)
+			}
 		}
 	}
 
@@ -437,6 +477,10 @@ func (h *Handler) iterate(
 	// Write last_processed_wisp LAST — it is the dedup marker.
 	if err := h.Store.SetMetadata(rootBeadID, FieldActiveWisp, nextWispID); err != nil {
 		return HandlerResult{}, fmt.Errorf("setting active wisp: %w", err)
+	}
+	// Clear pending_next_wisp: the speculative wisp has been adopted.
+	if err := h.Store.SetMetadata(rootBeadID, FieldPendingNextWisp, ""); err != nil {
+		return HandlerResult{}, fmt.Errorf("clearing pending next wisp: %w", err)
 	}
 	if err := h.Store.SetMetadata(rootBeadID, FieldLastProcessedWisp, wispID); err != nil {
 		return HandlerResult{}, fmt.Errorf("setting last processed wisp: %w", err)
@@ -678,6 +722,17 @@ func (h *Handler) clock() time.Time {
 		return h.Clock()
 	}
 	return time.Now()
+}
+
+// burnSpeculativeWisp closes a speculatively poured wisp and clears the
+// pending_next_wisp metadata field. Called when the gate outcome is terminal
+// or waiting_manual and the speculative wisp is not needed.
+func (h *Handler) burnSpeculativeWisp(rootBeadID, speculativeWispID string) {
+	if speculativeWispID == "" {
+		return
+	}
+	_ = h.Store.CloseBead(speculativeWispID)
+	_ = h.Store.SetMetadata(rootBeadID, FieldPendingNextWisp, "")
 }
 
 // CheckNestedConvergence validates that creating a new convergence loop

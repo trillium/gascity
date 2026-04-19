@@ -1064,6 +1064,7 @@ func extractCommitKeys(log []string) []string {
 		FieldWaitingReason:     true,
 		FieldIteration:         true,
 		FieldRetrySource:       true,
+		FieldPendingNextWisp:   true,
 	}
 	var result []string
 	for _, key := range log {
@@ -1086,4 +1087,202 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// --- Crash-safety (speculative pour) tests ---
+
+func TestHandleWispClosed_SpeculativePour_WispExistsBeforeGateEval(t *testing.T) {
+	// Verify that when HandleWispClosed processes a non-terminal gate outcome
+	// (fail, below max), the next wisp is speculatively poured BEFORE gate
+	// evaluation and adopted in iterate().
+	handler, store, _ := setupBasicHandler(t, map[string]string{
+		FieldGateOutcomeWisp: "wisp-iter-1",
+		FieldGateOutcome:     GateFail,
+	})
+
+	result, err := handler.HandleWispClosed(context.Background(), "root-1", "wisp-iter-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Action != ActionIterate {
+		t.Fatalf("Action = %q, want %q", result.Action, ActionIterate)
+	}
+	if result.NextWispID == "" {
+		t.Fatal("expected NextWispID to be set")
+	}
+
+	meta, _ := store.GetMetadata("root-1")
+	if meta[FieldActiveWisp] != result.NextWispID {
+		t.Errorf("active_wisp = %q, want %q", meta[FieldActiveWisp], result.NextWispID)
+	}
+	if meta[FieldPendingNextWisp] != "" {
+		t.Errorf("pending_next_wisp should be cleared, got %q", meta[FieldPendingNextWisp])
+	}
+}
+
+func TestHandleWispClosed_SpeculativePourBurnedOnTerminal(t *testing.T) {
+	handler, store, _ := setupBasicHandler(t, map[string]string{
+		FieldGateOutcomeWisp: "wisp-iter-1",
+		FieldGateOutcome:     GatePass,
+	})
+
+	result, err := handler.HandleWispClosed(context.Background(), "root-1", "wisp-iter-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Action != ActionApproved {
+		t.Fatalf("Action = %q, want %q", result.Action, ActionApproved)
+	}
+
+	iter2Key := IdempotencyKey("root-1", 2)
+	iter2ID, found, _ := store.FindByIdempotencyKey(iter2Key)
+	if !found {
+		t.Fatal("expected speculative wisp for iteration 2 to exist")
+	}
+	iter2Info, err := store.GetBead(iter2ID)
+	if err != nil {
+		t.Fatalf("reading speculative wisp: %v", err)
+	}
+	if iter2Info.Status != "closed" {
+		t.Errorf("speculative wisp status = %q, want %q (should be burned)", iter2Info.Status, "closed")
+	}
+
+	meta, _ := store.GetMetadata("root-1")
+	if meta[FieldPendingNextWisp] != "" {
+		t.Errorf("pending_next_wisp should be cleared, got %q", meta[FieldPendingNextWisp])
+	}
+}
+
+func TestHandleWispClosed_SpeculativePourBurnedOnWaitingManual(t *testing.T) {
+	handler, store, _ := setupBasicHandler(t, map[string]string{
+		FieldGateMode: GateModeManual,
+	})
+
+	result, err := handler.HandleWispClosed(context.Background(), "root-1", "wisp-iter-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Action != ActionWaitingManual {
+		t.Fatalf("Action = %q, want %q", result.Action, ActionWaitingManual)
+	}
+
+	iter2Key := IdempotencyKey("root-1", 2)
+	iter2ID, found, _ := store.FindByIdempotencyKey(iter2Key)
+	if !found {
+		t.Fatal("expected speculative wisp for iteration 2 to exist")
+	}
+	iter2Info, err := store.GetBead(iter2ID)
+	if err != nil {
+		t.Fatalf("reading speculative wisp: %v", err)
+	}
+	if iter2Info.Status != "closed" {
+		t.Errorf("speculative wisp status = %q, want %q (should be burned)", iter2Info.Status, "closed")
+	}
+}
+
+func TestHandleWispClosed_NoSpeculativePourAtMaxIterations(t *testing.T) {
+	handler, store, _ := setupBasicHandler(t, map[string]string{
+		FieldMaxIterations:   "1",
+		FieldGateOutcomeWisp: "wisp-iter-1",
+		FieldGateOutcome:     GateFail,
+	})
+
+	result, err := handler.HandleWispClosed(context.Background(), "root-1", "wisp-iter-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Action != ActionNoConvergence {
+		t.Fatalf("Action = %q, want %q", result.Action, ActionNoConvergence)
+	}
+
+	iter2Key := IdempotencyKey("root-1", 2)
+	_, found, _ := store.FindByIdempotencyKey(iter2Key)
+	if found {
+		t.Error("should not pour speculative wisp at max iterations")
+	}
+}
+
+func TestCrashAfterSpeculativePour_ReconcilerRecoversChain(t *testing.T) {
+	store := newFakeStore()
+	emitter := &fakeEmitter{}
+
+	rootMeta := map[string]string{
+		FieldState:           StateActive,
+		FieldIteration:       "1",
+		FieldMaxIterations:   "5",
+		FieldFormula:         "test-formula",
+		FieldTarget:          "test-agent",
+		FieldGateMode:        GateModeManual,
+		FieldActiveWisp:      "wisp-iter-1",
+		FieldPendingNextWisp: "wisp-iter-2",
+	}
+	store.addBead("root-1", "in_progress", "", "", rootMeta)
+	store.addBead("wisp-iter-1", "closed", "root-1",
+		IdempotencyKey("root-1", 1), nil)
+	store.addBead("wisp-iter-2", "in_progress", "root-1",
+		IdempotencyKey("root-1", 2), nil)
+
+	handler := &Handler{Store: store, Emitter: emitter}
+	reconciler := &Reconciler{Handler: handler}
+
+	report, err := reconciler.ReconcileBeads(context.Background(), []string{"root-1"})
+	if err != nil {
+		t.Fatalf("reconciliation error: %v", err)
+	}
+	if report.Errors > 0 {
+		var errMsgs []string
+		for _, d := range report.Details {
+			if d.Error != nil {
+				errMsgs = append(errMsgs, d.Error.Error())
+			}
+		}
+		t.Fatalf("reconciliation had %d errors: %v", report.Errors, errMsgs)
+	}
+
+	meta, _ := store.GetMetadata("root-1")
+	state := meta[FieldState]
+	if state != StateWaitingManual {
+		t.Errorf("state after reconciliation = %q, want %q", state, StateWaitingManual)
+	}
+}
+
+func TestCrashAfterSpeculativePour_NoActiveWisp_ReconcilerAdoptsSpeculative(t *testing.T) {
+	store := newFakeStore()
+	emitter := &fakeEmitter{}
+
+	rootMeta := map[string]string{
+		FieldState:             StateActive,
+		FieldIteration:         "1",
+		FieldMaxIterations:     "5",
+		FieldFormula:           "test-formula",
+		FieldTarget:            "test-agent",
+		FieldGateMode:          GateModeManual,
+		FieldActiveWisp:        "",
+		FieldLastProcessedWisp: "wisp-iter-1",
+		FieldPendingNextWisp:   "wisp-iter-2",
+	}
+	store.addBead("root-1", "in_progress", "", "", rootMeta)
+	store.addBead("wisp-iter-1", "closed", "root-1",
+		IdempotencyKey("root-1", 1), nil)
+	store.addBead("wisp-iter-2", "in_progress", "root-1",
+		IdempotencyKey("root-1", 2), nil)
+
+	handler := &Handler{Store: store, Emitter: emitter}
+	reconciler := &Reconciler{Handler: handler}
+
+	report, err := reconciler.ReconcileBeads(context.Background(), []string{"root-1"})
+	if err != nil {
+		t.Fatalf("reconciliation error: %v", err)
+	}
+	if report.Errors > 0 {
+		t.Fatalf("reconciliation had %d errors", report.Errors)
+	}
+
+	meta, _ := store.GetMetadata("root-1")
+	if meta[FieldActiveWisp] != "wisp-iter-2" {
+		t.Errorf("active_wisp = %q, want %q", meta[FieldActiveWisp], "wisp-iter-2")
+	}
+	if meta[FieldState] != StateActive {
+		t.Errorf("state = %q, want %q", meta[FieldState], StateActive)
+	}
 }
