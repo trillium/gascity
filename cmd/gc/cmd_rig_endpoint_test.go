@@ -1347,6 +1347,104 @@ func TestVerifyExternalDoltEndpointRejectsMissingLocalProjectID(t *testing.T) {
 	}
 }
 
+// TestDoRigSetEndpointExternalWritesBothConfigAndMetadata verifies that
+// --external writes dolt_server_host and dolt_server_port to metadata.json
+// alongside the canonical config.yaml, so that bd reads the correct endpoint.
+func TestDoRigSetEndpointExternalWritesBothConfigAndMetadata(t *testing.T) {
+	t.Setenv("GC_BEADS", "bd")
+
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(t.TempDir(), "frontend")
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRigEndpointCityConfig(t, cityDir, rigDir)
+	writeRigEndpointMetadata(t, rigDir, "fe")
+
+	origVerify := verifyRigExternalEndpoint
+	defer func() { verifyRigExternalEndpoint = origVerify }()
+	verifyRigExternalEndpoint = func(contract.ConfigState, string, string) error { return nil }
+
+	var stdout, stderr bytes.Buffer
+	code := doRigSetEndpoint(fsys.OSFS{}, cityDir, "frontend", rigEndpointOptions{
+		External: true,
+		Host:     "new-db.example.com",
+		Port:     "5506",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigSetEndpoint() = %d, stderr = %s", code, stderr.String())
+	}
+
+	// config.yaml must have the endpoint.
+	state := readRigEndpointConfigState(t, rigDir)
+	if state.DoltHost != "new-db.example.com" {
+		t.Fatalf("config.yaml DoltHost = %q, want %q", state.DoltHost, "new-db.example.com")
+	}
+	if state.DoltPort != "5506" {
+		t.Fatalf("config.yaml DoltPort = %q, want %q", state.DoltPort, "5506")
+	}
+
+	// metadata.json must also have the endpoint for bd compatibility.
+	data, err := os.ReadFile(filepath.Join(rigDir, ".beads", "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("metadata.json unmarshal: %v", err)
+	}
+	if got, _ := meta["dolt_server_host"].(string); got != "new-db.example.com" {
+		t.Fatalf("metadata.json dolt_server_host = %q, want %q", got, "new-db.example.com")
+	}
+	if got, _ := meta["dolt_server_port"].(float64); int(got) != 5506 {
+		t.Fatalf("metadata.json dolt_server_port = %v, want 5506", meta["dolt_server_port"])
+	}
+}
+
+// TestDoRigSetEndpointInheritClearsMetadataEndpoint verifies that --inherit
+// from a managed city removes dolt_server_host and dolt_server_port from
+// metadata.json when the rig switches from an external endpoint.
+func TestDoRigSetEndpointInheritClearsMetadataEndpoint(t *testing.T) {
+	t.Setenv("GC_BEADS", "bd")
+
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(t.TempDir(), "frontend")
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeRigEndpointCityConfig(t, cityDir, rigDir)
+	writeRigEndpointMetadata(t, cityDir, "hq")
+	writeRigEndpointRuntimeState(t, cityDir, 3311)
+
+	// Seed metadata.json with endpoint fields (simulating prior --external).
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "metadata.json"), []byte(`{"database":"dolt","backend":"dolt","dolt_mode":"server","dolt_database":"fe","dolt_server_host":"old-db.example.com","dolt_server_port":3307}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigSetEndpoint(fsys.OSFS{}, cityDir, "frontend", rigEndpointOptions{Inherit: true}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigSetEndpoint() = %d, stderr = %s", code, stderr.String())
+	}
+
+	// metadata.json must NOT have dolt_server_host or dolt_server_port after
+	// switching to --inherit from a managed city.
+	data, err := os.ReadFile(filepath.Join(rigDir, ".beads", "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(data, &meta); err != nil {
+		t.Fatalf("metadata.json unmarshal: %v", err)
+	}
+	if _, ok := meta["dolt_server_host"]; ok {
+		t.Fatalf("metadata.json should not have dolt_server_host after --inherit, got: %s", string(data))
+	}
+	if _, ok := meta["dolt_server_port"]; ok {
+		t.Fatalf("metadata.json should not have dolt_server_port after --inherit, got: %s", string(data))
+	}
+}
+
 func writeRigEndpointCityConfig(t *testing.T, cityDir, rigDir string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
