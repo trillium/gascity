@@ -320,6 +320,20 @@ current_head() {
       return 0
     fi
   fi
+  if [ "$mode" = "head_changes_once" ]; then
+    calls_file="$state_file.head-calls"
+    calls=0
+    if [ -f "$calls_file" ]; then
+      calls="$(cat "$calls_file")"
+    fi
+    calls=$((calls + 1))
+    printf '%%s\n' "$calls" > "$calls_file"
+    if [ "$calls" -eq 2 ]; then
+      printf 'writercommit\n' > "$state_file"
+      printf 'writercommit\n'
+      return 0
+    fi
+  fi
   if [ -n "$state_file" ] && [ -f "$state_file" ]; then
     sed -n '1p' "$state_file"
   else
@@ -344,7 +358,7 @@ set_hash() {
 case "$query" in
   *"SELECT COUNT(*) FROM dolt_remotes WHERE name = 'origin'"*)
     case "$mode" in
-      remote_success|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure|multiple_remotes_with_origin)
+      remote_success|remote_active_branch|remote_invalid_active_branch|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure|multiple_remotes_with_origin)
         print_cell 1
         ;;
       *)
@@ -366,7 +380,7 @@ case "$query" in
     ;;
   *"SELECT COUNT(*) FROM dolt_remotes"*)
     case "$mode" in
-      remote_success|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure)
+      remote_success|remote_active_branch|remote_invalid_active_branch|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure)
         print_cell 1
         ;;
       multiple_remotes_with_origin|multiple_remotes_no_origin)
@@ -383,7 +397,7 @@ case "$query" in
     ;;
   *"SELECT name FROM dolt_remotes ORDER BY name LIMIT 1"*)
     case "$mode" in
-      remote_success|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure|multiple_remotes_with_origin)
+      remote_success|remote_active_branch|remote_invalid_active_branch|remote_ahead|remote_ahead_reconciled|remote_fetch_failure|remote_fetch_failure_once|remote_push_failure|remote_advances_before_push|remote_gc_failure_once|remote_empty_head_push_failure|remote_ancestry_probe_failure|multiple_remotes_with_origin)
         print_cell origin
         ;;
       explicit_backup_remote)
@@ -418,6 +432,16 @@ case "$query" in
   *"DOLT_FETCH('backup')"*)
     exit 0
     ;;
+  *"SELECT active_branch()"*)
+    if [ "$mode" = "remote_active_branch" ]; then
+      print_cell gascity-3
+    elif [ "$mode" = "remote_invalid_active_branch" ]; then
+      print_cell --force
+    else
+      print_cell main
+    fi
+    exit 0
+    ;;
   *"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/origin/main'"*)
     if [ "$mode" = "remote_advances_before_push" ]; then
       calls_file="$state_file.remote-head-calls"
@@ -439,6 +463,14 @@ case "$query" in
     else
       print_cell headcommit
     fi
+    exit 0
+    ;;
+  *"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/origin/gascity-3'"*)
+    print_cell headcommit
+    exit 0
+    ;;
+  *"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/origin/trunk'"*)
+    print_cell headcommit
     exit 0
     ;;
   *"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/backup/main'"*)
@@ -478,6 +510,22 @@ case "$query" in
     exit 0
     ;;
   *"SELECT commit_hash FROM dolt_log ORDER BY date DESC LIMIT 1"*)
+    if [ "$mode" = "head_probe_failure_during_preflight_verify" ]; then
+      # The compact retry loop probes HEAD once before preflight and once
+      # after collecting counts/hash; fail the second probe to prove that
+      # verify-time probe errors are not reported as HEAD movement.
+      calls_file="$state_file.head-calls"
+      calls=0
+      if [ -f "$calls_file" ]; then
+        calls="$(cat "$calls_file")"
+      fi
+      calls=$((calls + 1))
+      printf '%%s\n' "$calls" > "$calls_file"
+      if [ "$calls" -eq 2 ]; then
+        printf 'head probe unavailable during preflight verify\n' >&2
+        exit 49
+      fi
+    fi
     print_cell "$(current_head)"
     exit 0
     ;;
@@ -610,6 +658,19 @@ case "$query" in
     fi
     exit 0
     ;;
+  *"DOLT_PUSH('--force', '--set-upstream', 'origin', 'gascity-3')"*)
+    exit 0
+    ;;
+  *"DOLT_PUSH('--force', '--set-upstream', 'origin', 'gascity-3:trunk')"*)
+    exit 0
+    ;;
+  *"DOLT_PUSH('--force', '--set-upstream', 'origin', 'main:gascity-3')"*)
+    if [ "$mode" = "remote_push_failure" ] || [ "$mode" = "remote_empty_head_push_failure" ]; then
+      printf 'push unavailable\n' >&2
+      exit 53
+    fi
+    exit 0
+    ;;
   *"DOLT_PUSH('--force', '--set-upstream', 'backup', 'main')"*)
     exit 0
     ;;
@@ -702,6 +763,119 @@ func TestCompactScriptRefetchesAndForcePushesRemote(t *testing.T) {
 	}
 	if strings.Count(log, "CALL DOLT_FETCH('origin')") < 2 {
 		t.Fatalf("compact should re-fetch immediately before remote push:\n%s", log)
+	}
+}
+
+func TestCompactScriptPushesActiveBranchToRemote(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "remote_active_branch", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err != nil {
+		t.Fatalf("compact failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "remote=origin pushed compacted gascity-3") {
+		t.Fatalf("output missing active-branch remote push success:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	log := string(data)
+	for _, want := range []string{
+		"SELECT active_branch()",
+		"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/origin/gascity-3'",
+		"CALL DOLT_PUSH('--force', '--set-upstream', 'origin', 'gascity-3')",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("dolt log missing %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "CALL DOLT_PUSH('--force', '--set-upstream', 'origin', 'main')") {
+		t.Fatalf("compact must not hardcode main for non-main active branch:\n%s", log)
+	}
+}
+
+func TestCompactScriptUsesRefspecEnvOverrideForRemoteBranch(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "remote_active_branch",
+		"GC_DOLT_COMPACT_THRESHOLD_COMMITS=500",
+		"GC_DOLT_REFSPEC_BEADS=gascity-3:trunk",
+	)
+	if err != nil {
+		t.Fatalf("compact failed with refspec override: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "remote=origin pushed compacted trunk") {
+		t.Fatalf("output missing refspec remote push success:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	log := string(data)
+	for _, want := range []string{
+		"SELECT active_branch()",
+		"SELECT hash FROM dolt_remote_branches WHERE name = 'remotes/origin/trunk'",
+		"CALL DOLT_PUSH('--force', '--set-upstream', 'origin', 'gascity-3:trunk')",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("dolt log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestCompactScriptRejectsRefspecEnvOverrideForDifferentActiveBranch(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "remote_active_branch",
+		"GC_DOLT_COMPACT_THRESHOLD_COMMITS=500",
+		"GC_DOLT_REFSPEC_BEADS=main:trunk",
+	)
+	if err == nil {
+		t.Fatalf("compact succeeded with mismatched refspec local branch:\n%s", out)
+	}
+	if !strings.Contains(out, "refspec override local branch=main does not match active branch=gascity-3") {
+		t.Fatalf("output missing mismatched refspec error:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	log := string(data)
+	for _, forbidden := range []string{"DOLT_RESET", "DOLT_COMMIT", "DOLT_PUSH"} {
+		if strings.Contains(log, forbidden) {
+			t.Fatalf("mismatched refspec must block compact before %s:\n%s", forbidden, log)
+		}
+	}
+}
+
+func TestCompactScriptRefspecOptionShapedOverrideFails(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "remote_success",
+		"GC_DOLT_COMPACT_THRESHOLD_COMMITS=500",
+		"GC_DOLT_REFSPEC_BEADS=--force",
+	)
+	if err == nil {
+		t.Fatalf("compact succeeded with option-shaped refspec override:\n%s", out)
+	}
+	if !strings.Contains(out, "invalid refspec override") {
+		t.Fatalf("output missing invalid refspec override error:\n%s", out)
+	}
+}
+
+func TestCompactScriptWarnsWhenActiveBranchFallbacksToMain(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "remote_invalid_active_branch", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err != nil {
+		t.Fatalf("compact failed after active-branch fallback: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "WARN: active branch unresolved; falling back to main") {
+		t.Fatalf("output missing active-branch fallback warning:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, "CALL DOLT_PUSH('--force', '--set-upstream', 'origin', 'main')") {
+		t.Fatalf("fallback should push main after warning:\n%s", log)
 	}
 }
 
@@ -950,21 +1124,112 @@ func TestCompactScriptRetriesPendingPushWhenRemoteHeadBecomesLocalLogAncestor(t 
 	}
 }
 
-func TestCompactScriptCompactsWhenHeadChangesBeforeFlatten(t *testing.T) {
+func TestCompactScriptRetriesPendingPushWithRefspecRemoteBranch(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	firstOut, err := fixture.run(t, "remote_push_failure",
+		"GC_DOLT_COMPACT_THRESHOLD_COMMITS=500",
+		"GC_DOLT_REFSPEC_BEADS=main:gascity-3",
+	)
+	if err != nil {
+		t.Fatalf("initial compact should leave refspec remote push pending: %v\n%s", err, firstOut)
+	}
+	pendingPush := filepath.Join(fixture.cityPath, ".gc", "runtime", "packs", "dolt", "compact-pending-push", "beads")
+	marker, err := os.ReadFile(pendingPush)
+	if err != nil {
+		t.Fatalf("initial compact should write pending-push marker: %v", err)
+	}
+	if !strings.Contains(string(marker), "local_branch=main") ||
+		!strings.Contains(string(marker), "remote_branch=gascity-3") {
+		t.Fatalf("pending-push marker should preserve refspec branches:\n%s", marker)
+	}
+
+	secondOut, err := fixture.run(t, "remote_success", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err != nil {
+		t.Fatalf("pending-push retry should use marker refspec: %v\n%s", err, secondOut)
+	}
+	if !strings.Contains(secondOut, "pending_push=present") ||
+		!strings.Contains(secondOut, "pushed compacted gascity-3") {
+		t.Fatalf("retry missing refspec remote push explanation:\n%s", secondOut)
+	}
+	logData, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	if !strings.Contains(string(logData), "CALL DOLT_PUSH('--force', '--set-upstream', 'origin', 'main:gascity-3')") {
+		t.Fatalf("pending-push retry should push stored refspec:\n%s", logData)
+	}
+	if _, err := os.Stat(pendingPush); !os.IsNotExist(err) {
+		t.Fatalf("successful refspec retry should clear marker, stat err=%v", err)
+	}
+}
+
+func TestCompactScriptAbortsWhenHeadKeepsMovingAcrossPreflightRetries(t *testing.T) {
 	fixture := newCompactScriptFixture(t)
 	out, err := fixture.run(t, "head_changes_before_flatten", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
-	if err != nil {
-		t.Fatalf("compact should tolerate live-server moving HEAD before flatten: %v\n%s", err, out)
+	if err == nil {
+		t.Fatalf("compact succeeded despite HEAD moving across every preflight retry:\n%s", out)
+	}
+	if !strings.Contains(out, "HEAD kept moving across 3 preflight attempts") {
+		t.Fatalf("compact should explain the bounded preflight abort:\n%s", out)
 	}
 	data, err := os.ReadFile(fixture.doltLog)
 	if err != nil {
 		t.Fatalf("read dolt log: %v", err)
 	}
 	log := string(data)
-	for _, want := range []string{"DOLT_RESET", "DOLT_COMMIT", "DOLT_GC"} {
-		if !strings.Contains(log, want) {
-			t.Fatalf("moving HEAD should not block local compaction; missing %s:\n%s", want, log)
+	for _, forbidden := range []string{"DOLT_RESET", "DOLT_COMMIT", "DOLT_GC"} {
+		if strings.Contains(log, forbidden) {
+			t.Fatalf("continuously moving HEAD should abort before flatten; found %s:\n%s", forbidden, log)
 		}
+	}
+}
+
+func TestCompactScriptRetriesPreflightWhenHeadStabilizes(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "head_changes_once", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err != nil {
+		t.Fatalf("compact should retry and flatten once HEAD stabilizes: %v\n%s", err, out)
+	}
+	if got := strings.Count(out, "HEAD moved during preflight attempt=1/3"); got != 1 {
+		t.Fatalf("compact should log exactly one preflight retry, got %d:\n%s", got, out)
+	}
+	if strings.Contains(out, "HEAD moved during preflight attempt=2/3") ||
+		strings.Contains(out, "HEAD kept moving across") {
+		t.Fatalf("compact should stop retrying once HEAD stabilizes:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	log := string(data)
+	if got := strings.Count(log, "DOLT_RESET"); got != 1 {
+		t.Fatalf("stabilized HEAD should flatten exactly once; DOLT_RESET count=%d:\n%s", got, log)
+	}
+	for _, want := range []string{"DOLT_COMMIT", "DOLT_GC"} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("stabilized HEAD should complete compaction; missing %s:\n%s", want, log)
+		}
+	}
+}
+
+func TestCompactScriptFailsWhenPreflightHeadVerifyProbeFails(t *testing.T) {
+	fixture := newCompactScriptFixture(t)
+	out, err := fixture.run(t, "head_probe_failure_during_preflight_verify", "GC_DOLT_COMPACT_THRESHOLD_COMMITS=500")
+	if err == nil {
+		t.Fatalf("compact succeeded despite preflight HEAD verify probe failure:\n%s", out)
+	}
+	if strings.Contains(out, "HEAD kept moving") {
+		t.Fatalf("probe failure must not be reported as moving HEAD:\n%s", out)
+	}
+	if !strings.Contains(out, "head probe unavailable during preflight verify") {
+		t.Fatalf("compact should surface the underlying HEAD probe failure:\n%s", out)
+	}
+	data, err := os.ReadFile(fixture.doltLog)
+	if err != nil {
+		t.Fatalf("read dolt log: %v", err)
+	}
+	if strings.Contains(string(data), "DOLT_RESET") || strings.Contains(string(data), "DOLT_COMMIT") {
+		t.Fatalf("failed HEAD verify probe should abort before flatten:\n%s", data)
 	}
 }
 
@@ -2193,8 +2458,10 @@ func TestDoctorScriptChecksBackupArtifactFreshnessPerDatabase(t *testing.T) {
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("mkdir data dir: %v", err)
+	for _, db := range []string{"prod", "archive"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, db, ".dolt"), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", db, err)
+		}
 	}
 	freshBackup := filepath.Join(artifactDir, "prod.backup")
 	writeTestFile(t, freshBackup, "backup")
@@ -2213,6 +2480,15 @@ func TestDoctorScriptChecksBackupArtifactFreshnessPerDatabase(t *testing.T) {
 	gcLogPath := writeDogFakeGC(t, binDir)
 	writeExecutable(t, filepath.Join(binDir, "dolt"), `#!/usr/bin/env bash
 set -euo pipefail
+case "$1" in
+  backup)
+    case "$(basename "$PWD")" in
+      prod) printf 'prod-backup\n' ;;
+      archive) printf 'archive-backup\n' ;;
+    esac
+    exit 0
+    ;;
+esac
 case "$*" in
   *"COUNT(*) FROM information_schema.PROCESSLIST"*)
     printf 'COUNT(*)\n1\n'
@@ -2291,6 +2567,68 @@ exit 0
 	}
 }
 
+// TestDoctorBackupOnlyChecksDBsWithBackupRemote asserts mol-dog-doctor's backup
+// freshness scope mirrors mol-dog-backup.sh — only DBs with a configured
+// "<db>-backup" remote are eligible. Cities with user DBs but no backup
+// remotes (legitimate config) get no false stale-backup alarms.
+//
+// Companion to TestBackupScriptIgnoresDocumentedSystemSchemasForAutoDiscovery:
+// backup.sh already filters by remote presence; doctor.sh must use the same
+// gate so the two scripts agree on what "backup-eligible" means.
+func TestDoctorBackupOnlyChecksDBsWithBackupRemote(t *testing.T) {
+	cityPath := t.TempDir()
+	dataDir := filepath.Join(cityPath, "dolt-data")
+	artifactDir := filepath.Join(cityPath, ".dolt-backup")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	for _, db := range []string{"prod", "archive"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, db, ".dolt"), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", db, err)
+		}
+	}
+
+	binDir := t.TempDir()
+	gcLogPath := writeDogFakeGC(t, binDir)
+	writeExecutable(t, filepath.Join(binDir, "dolt"), `#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  backup)
+    if [ "$(basename "$PWD")" = "prod" ]; then
+      printf 'prod-backup\n'
+    fi
+    exit 0
+    ;;
+esac
+case "$*" in
+  *"COUNT(*) FROM information_schema.PROCESSLIST"*)
+    printf 'COUNT(*)\n1\n'
+    exit 0
+    ;;
+  *"SHOW DATABASES"*)
+    printf 'Database\nprod\narchive\n'
+    exit 0
+    ;;
+esac
+exit 0
+`)
+
+	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=1")
+	if !strings.Contains(out, "server: ok") {
+		t.Fatalf("unexpected doctor output:\n%s", out)
+	}
+	gcLog, err := os.ReadFile(gcLogPath)
+	if err != nil {
+		t.Fatalf("read gc log: %v", err)
+	}
+	if strings.Contains(string(gcLog), "archive backup missing") {
+		t.Fatalf("doctor warned about archive (no <db>-backup remote configured); should be filtered out:\n%s", gcLog)
+	}
+	if !strings.Contains(string(gcLog), "prod backup missing") {
+		t.Fatalf("doctor did not warn about prod (eligible: has prod-backup remote, no artifact); scope filter should not exclude it:\n%s", gcLog)
+	}
+}
+
 func TestDoctorScriptDetectsDoctestOrphansWithBSDGrep(t *testing.T) {
 	cityPath := t.TempDir()
 	dataDir := filepath.Join(cityPath, "dolt-data")
@@ -2340,8 +2678,10 @@ func TestDoctorScriptDoesNotCreditSharedPrefixBackupToDatabase(t *testing.T) {
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatalf("mkdir data dir: %v", err)
+	for _, db := range []string{"prod", "prod_dev"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, db, ".dolt"), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", db, err)
+		}
 	}
 	freshSiblingBackup := filepath.Join(artifactDir, "prod_dev.backup")
 	writeTestFile(t, freshSiblingBackup, "backup")
@@ -2354,6 +2694,15 @@ func TestDoctorScriptDoesNotCreditSharedPrefixBackupToDatabase(t *testing.T) {
 	gcLogPath := writeDogFakeGC(t, binDir)
 	writeExecutable(t, filepath.Join(binDir, "dolt"), `#!/usr/bin/env bash
 set -euo pipefail
+case "$1" in
+  backup)
+    case "$(basename "$PWD")" in
+      prod) printf 'prod-backup\n' ;;
+      prod_dev) printf 'prod_dev-backup\n' ;;
+    esac
+    exit 0
+    ;;
+esac
 case "$*" in
   *"COUNT(*) FROM information_schema.PROCESSLIST"*)
     printf 'COUNT(*)\n1\n'
