@@ -181,6 +181,12 @@ var driftReadyTimeout = 5 * time.Second
 // the production kill+spawn (or systemctl) side effects.
 var restartHelpersHook = defaultRestartHelpers
 
+// readSupervisorExePathFn lets tests substitute an alternative exe-path
+// probe. The default uses the Linux /proc/<pid>/exe symlink; tests on
+// platforms that lack /proc can inject os.Executable or another safe
+// stand-in when the supervisor PID is the test process itself.
+var readSupervisorExePathFn = readSupervisorExePath
+
 // driftRestartLoopMax / driftRestartLoopWindow define the loop-guard
 // budget: at most 3 supervisor auto-restarts may occur within any
 // 60-second window. Persistence is via driftRestartHistoryPath so the
@@ -211,7 +217,7 @@ func runStartDriftCheck(cityPath string, stdout, stderr io.Writer) (int, bool) {
 		return 0, true
 	}
 
-	exePath, exeErr := readSupervisorExePath(pid)
+	exePath, exeErr := readSupervisorExePathFn(pid)
 	baseURL, urlErr := supervisorAPIBaseURLHook()
 	if urlErr != nil {
 		// Without a base URL we can't query /health. Don't block
@@ -337,7 +343,7 @@ func runStartDriftCheck(cityPath string, stdout, stderr io.Writer) (int, bool) {
 			// competing standalone during the brief window before the
 			// registry catches up.
 			justRestartedSupervisorPID = newPID
-			newExe, _ := readSupervisorExePath(newPID)
+			newExe, _ := readSupervisorExePathFn(newPID)
 			ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel2()
 			newStatus, statusErr2 := newHTTPSupervisorClient(baseURL).Status(ctx2)

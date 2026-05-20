@@ -248,16 +248,21 @@ func driftCheckEnv(t *testing.T, supervisorBuildID string) (cityPath string, res
 	oldBaseURL := supervisorAPIBaseURLHook
 	oldActive := supervisorSystemctlActive
 	oldHelpers := restartHelpersHook
+	oldExePath := readSupervisorExePathFn
 	t.Cleanup(func() {
 		supervisorAliveHook = oldAlive
 		supervisorAPIBaseURLHook = oldBaseURL
 		supervisorSystemctlActive = oldActive
 		restartHelpersHook = oldHelpers
+		readSupervisorExePathFn = oldExePath
 	})
 
-	// Use the current process PID so readSupervisorExePath
-	// (/proc/<pid>/exe) succeeds without requiring root.
+	// Use the current process PID. On Linux, /proc/<pid>/exe resolves
+	// the current binary without root. On platforms that lack /proc
+	// (e.g. macOS), substitute os.Executable so the test remains
+	// cross-platform — the supervisor is the test process itself here.
 	supervisorAliveHook = os.Getpid
+	readSupervisorExePathFn = func(_ int) (string, error) { return os.Executable() }
 	supervisorAPIBaseURLHook = func() (string, error) { return srv.URL, nil }
 	supervisorSystemctlActive = func(string) bool { return false }
 	restartHelpersHook = func() restartHelpers {

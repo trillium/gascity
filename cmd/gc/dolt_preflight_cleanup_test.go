@@ -91,7 +91,15 @@ func TestFileOpenedByAnyProcessBoundsLsof(t *testing.T) {
 }
 
 func TestFileOpenedByAnyProcessUsesUnixSocketTableForStaleSocket(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "dolt.sock")
+	// Use a short directory under os.TempDir() — macOS limits unix socket
+	// paths to 104 bytes, and t.TempDir() embeds the full test name which
+	// pushes the path well past that limit on that platform.
+	sockDir, err := os.MkdirTemp("", "gs")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
+	socketPath := filepath.Join(sockDir, "d.sock")
 	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatalf("socket(AF_UNIX): %v", err)
@@ -107,7 +115,6 @@ func TestFileOpenedByAnyProcessUsesUnixSocketTableForStaleSocket(t *testing.T) {
 	if err := syscall.Close(fd); err != nil {
 		t.Fatalf("close unix socket: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Remove(socketPath) })
 	if info, err := os.Lstat(socketPath); err != nil || info.Mode()&os.ModeSocket == 0 {
 		if err != nil {
 			t.Fatalf("socket precondition stat: %v", err)
