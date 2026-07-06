@@ -92,6 +92,13 @@ const (
 	// archive's filename and seq range so log readers can stitch back
 	// across rotations.
 	EventsRotated = "events.rotated"
+
+	// WebhookInbound fires when the webhook ingress (internal/webhookd)
+	// accepts a verified external webhook (GitHub, Vercel, ...) and emits
+	// it onto the bus. The payload carries provider identity and a compact
+	// summary; the raw body stays at the ingress layer (targeted context,
+	// not dumps). See plans/event-stream-webhooks.md.
+	WebhookInbound = "webhook.inbound"
 )
 
 // KnownEventTypes lists every event-type constant this package defines.
@@ -119,6 +126,10 @@ var KnownEventTypes = []string{
 	ExtMsgAdapterAdded, ExtMsgAdapterRemoved,
 	ExtMsgInbound, ExtMsgOutbound,
 	EventsRotated,
+	// WebhookInbound is omitted until internal/webhookd (which owns the
+	// payload registration) is imported by internal/api — that lands with
+	// the ingress HTTP handler (plans/event-stream-webhooks.md, step 2).
+	// Until then, subscribers receive it via the custom-event envelope.
 }
 
 // Event is a single recorded occurrence in the system.
