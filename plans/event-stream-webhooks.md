@@ -27,9 +27,9 @@ Design:
 
 ## Next steps (builder-actionable, in order)
 
-1. Define the `WebhookInbound` payload type in `internal/events` following the `extmsg/events.go` pattern (typed struct, `IsEventPayload()`, named schema constant). Unit test schema registration.
-2. Build the ingress service (new `internal/webhookd`, patterned on `internal/workspacesvc` service shape): `POST /hooks/{provider}`, provider verifier interface + GitHub HMAC implementation first, idempotency cache keyed on delivery ID, emit to bus. Table-driven tests with recorded GitHub payloads.
-3. Wire exposure: serve on a local port, `tailscale funnel <port>` route, document the public URL + GitHub webhook setup (repo settings → webhook → secret) in the service doc.
+1. **Done (task-h5q).** `WebhookInbound` (`webhook.inbound`) is defined in `internal/events/events.go`; `internal/webhookd.InboundEventPayload` implements the schema and registers via `events.RegisterPayload` in `internal/webhookd/events.go`. It's deliberately absent from `events.KnownEventTypes` until step 3 wires the package into `internal/api` (see the comment at the constant's declaration).
+2. **Done (task-h5q).** `internal/webhookd` exists: `POST /hooks/{provider}` handler (`handler.go`), `Verifier`/`GitHubVerifier` doing GitHub HMAC-SHA256 over the raw body via `X-Hub-Signature-256` (`verify.go`), and a bounded TTL `DeliveryDedup` cache keyed on `X-GitHub-Delivery` (`dedup.go`). Table-driven tests cover valid/invalid/missing signatures and duplicate-delivery no-ops (`handler_test.go`, `verify_test.go`, `dedup_test.go`). The package is self-contained and dependency-injected (`EmitEventFunc`) but not yet mounted on any live mux — that's step 3.
+3. Wire exposure: mount `webhookd.Handler` on a live port, add its config to `internal/config.City`'s TOML schema, add `WebhookInbound` to `events.KnownEventTypes` plus the Huma/SSE typed-envelope union in `internal/api`, `tailscale funnel <port>` route, document the public URL + GitHub webhook setup (repo settings → webhook → secret) in the service doc.
 4. Point one real GitHub repo's webhook at it; verify an issue comment lands on `/v0/events/stream` end-to-end.
 5. Retire `github_pr_monitor.go` polling for repos covered by webhooks (same PR as step 4 or immediately after — gate-or-delete).
 6. Mayor subscription: per `Plans/mayor-agent-architecture.md`, mayor consumes `webhook.inbound` filtered by provider/event_kind.

@@ -162,6 +162,22 @@ the canonical route, not the legacy route.
   `internal/agent/` is now a helper package with session-name utilities
   and startup hints — not a primitive. Do not reconstruct the
   `Agent` / `Handle` interfaces.
+- **Webhook ingress (started task-h5q, in progress; plan:
+  `plans/event-stream-webhooks.md`).** `internal/webhookd` is a
+  self-contained, unmounted package: `Verifier`/`GitHubVerifier`
+  (HMAC-SHA256 over the raw body via `X-Hub-Signature-256`),
+  `DeliveryDedup` (bounded TTL cache keyed on `X-GitHub-Delivery`),
+  and `Handler` (`POST /hooks/{provider}`, GitHub only) that emits
+  `webhookd.InboundEventPayload` via an injected `EmitEventFunc`.
+  `events.WebhookInbound` is intentionally still absent from
+  `events.KnownEventTypes` (see the comment at its declaration in
+  `internal/events/events.go`) until a follow-up task mounts the
+  handler on a live mux/Funnel port, wires it into
+  `internal/config.City`'s TOML schema, and adds it to
+  `KnownEventTypes` plus the Huma/SSE typed-envelope union in
+  `internal/api`. Until then this package is dead code from the
+  binary's perspective — correctly so; the next task in the plan
+  doc's ordered list picks up from "wire exposure."
 
 ## Design decisions (settled)
 
@@ -417,3 +433,10 @@ These apply to all code in this project — frontend and server:
   static checking (linting, compilers, etc) is that they surface issues at
   build-time so that they can be fixed now instead of lead to errors at runtime.
   Take advantage of that feedback to fix those errors!
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
