@@ -127,9 +127,10 @@ var KnownEventTypes = []string{
 	ExtMsgInbound, ExtMsgOutbound,
 	EventsRotated,
 	// WebhookInbound is omitted until internal/webhookd (which owns the
-	// payload registration) is imported by internal/api — that lands with
-	// the ingress HTTP handler (plans/event-stream-webhooks.md, step 2).
-	// Until then, subscribers receive it via the custom-event envelope.
+	// payload registration) is imported by internal/api — that lands when
+	// step 3 wires the package into a live mux and internal/api
+	// (plans/event-stream-webhooks.md). Until then, subscribers receive
+	// it via the custom-event envelope.
 }
 
 // Event is a single recorded occurrence in the system.

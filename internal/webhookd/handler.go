@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -195,11 +196,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := readLimitedBody(r)
 	if err != nil {
-		http.Error(w, "request body too large or unreadable", http.StatusBadRequest)
+		if errors.Is(err, errBodyTooLarge) {
+			h.deps.Logf("webhookd: rejecting %s delivery: %v", provider, err)
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		h.deps.Logf("webhookd: reading %s delivery body: %v", provider, err)
+		http.Error(w, "internal error reading request body", http.StatusInternalServerError)
 		return
 	}
 
 	if err := verifier.Verify(r.Header, body); err != nil {
+		h.deps.Logf("webhookd: rejecting %s delivery: %v", provider, err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -242,13 +250,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// errBodyTooLarge is returned by readLimitedBody when the delivery exceeds
+// maxBodyBytes. Distinguished from a genuine io.ReadAll failure so ServeHTTP
+// can return 413 (client-shaped, no redelivery expected) instead of 500
+// (server-shaped, provider should retry).
+var errBodyTooLarge = fmt.Errorf("webhookd: request body exceeds %d byte limit", maxBodyBytes)
+
 func readLimitedBody(r *http.Request) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("webhookd: reading request body: %w", err)
 	}
 	if len(body) > maxBodyBytes {
-		return nil, fmt.Errorf("webhookd: request body exceeds %d byte limit", maxBodyBytes)
+		return nil, errBodyTooLarge
 	}
 	return body, nil
 }
