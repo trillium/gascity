@@ -9,9 +9,10 @@ import "github.com/gastownhall/gascity/internal/events"
 
 // InboundEventPayload is emitted on events.WebhookInbound
 // ("webhook.inbound") after a delivery passes signature verification.
-// It deliberately carries a summary, not the raw body — subscribers that
-// need full payloads fetch them from the ingress store by DeliveryID
-// (targeted context, not dumps).
+// It deliberately carries a summary, not the raw body — this package does
+// not persist raw deliveries today; PayloadDigest ties the event to the
+// delivery for a future raw-body store (plans/event-stream-webhooks.md,
+// step 3) rather than dumping the full payload onto the bus.
 type InboundEventPayload struct {
 	// Provider is the ingress route that accepted the delivery ("github",
 	// "vercel", ...).

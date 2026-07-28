@@ -28,10 +28,8 @@ var (
 	ErrSecretUnset = errors.New("webhookd: webhook secret env var is unset")
 )
 
-// validSecretEnvName mirrors the secret-env validation idiom already
-// established in internal/config/github_pr_monitor.go: the secret VALUE is
-// never stored in config or code, only the name of the environment
-// variable that holds it.
+// validSecretEnvName enforces that only an environment-variable NAME is
+// ever configured for a webhook secret — never the secret VALUE itself.
 var validSecretEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // GitHub webhook delivery headers, per
@@ -67,8 +65,7 @@ type GitHubVerifier struct {
 
 // NewGitHubVerifier constructs a GitHubVerifier for the given secret
 // environment variable name. It returns an error if secretEnv is not a
-// valid environment-variable identifier (the same validation
-// github_pr_monitor.go applies to webhook_secret_env).
+// valid environment-variable identifier.
 func NewGitHubVerifier(secretEnv string) (*GitHubVerifier, error) {
 	secretEnv = strings.TrimSpace(secretEnv)
 	if !validSecretEnvName.MatchString(secretEnv) {

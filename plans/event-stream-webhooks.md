@@ -4,14 +4,14 @@
 
 ## Problem
 
-Agents need external events (GitHub comments, CI results, appointment confirmations) as context, but there's no path for external services to push events in. Everything is pull-based (`internal/config/github_pr_monitor.go`) or manual.
+Agents need external events (GitHub comments, CI results, appointment confirmations) as context, but there's no path for external services to push events in. Everything today is pull-based or manual; no polling connector exists yet.
 
 ## What already exists (verified 2026-07-06)
 
 - **Event bus + agent subscription: SOLVED.** `internal/events` is a typed event bus; payloads implementing `events.Payload` flow through the central registry and emerge on the typed **`/v0/events/stream`** wire with named schemas (see `internal/extmsg/events.go` for the pattern). Agents subscribe by event type. No Redis, no JSONL, no new queue — the answer to "what substrate" is *the bus that's already there*, persisted via the Dolt-backed `events`/`wisp_events` tables (`internal/beads/native_dolt_store.go`).
 - **Conversational routing: SOLVED.** `internal/extmsg` is the external-message fabric (adapters, bindings, delivery, per-conversation session ownership) — openclaw-bridge (#3435) ships iMessage + Telegram connectors on it. Reply-able external sources belong here; fire-and-forget events belong on the bus directly.
 - **Inbound exposure: SOLVED.** Tailscale Funnel is **already enabled and serving** on this machine (`tailscale funnel status` → `https://macbook.hippo-tilapia.ts.net`). External webhooks can POST to a funneled port today. Outbound was never blocked — Tailscale nodes have ordinary egress.
-- **Prior art to retire:** `internal/config/github_pr_monitor.go` polls GitHub. Once GitHub webhooks flow, retire the poller (retirement rule: new surface names what it replaces).
+- **No existing poller to retire.** A repo survey (2026-07-06) found no GitHub PR-polling connector under `internal/config/` or elsewhere in this repo today; the "retire the poller" framing in the original stub does not apply until such a connector exists.
 
 ## The gap: webhook ingress
 
@@ -21,7 +21,7 @@ Design:
 
 - An ingress HTTP service exposing `POST /hooks/{provider}` (e.g. `/hooks/github`, `/hooks/vercel`), funneled.
 - Per-provider verification at the edge: GitHub `X-Hub-Signature-256` HMAC, Vercel signature header; unknown provider or bad signature → 401, never reaches the bus. Secrets via the existing config layer, never in code.
-- Normalization to a typed payload, e.g. `events.WebhookInbound` (`webhook.inbound`) carrying `{provider, event_kind, delivery_id, actor, subject, payload_digest, raw_ref}` — the full raw body stored/persisted, the bus event kept small (targeted context, not dumps).
+- Normalization to a typed payload, e.g. `events.WebhookInbound` (`webhook.inbound`) carrying `{provider, event_kind, delivery_id, actor, subject, payload_digest}` — the bus event kept small (targeted context, not dumps). `raw_ref` (a pointer to the persisted full raw body) is aspirational: `InboundEventPayload` ships `payload_digest` only today; no raw-body store exists yet (task-h5q, step 2).
 - Idempotency on provider delivery IDs (GitHub `X-GitHub-Delivery`) — webhooks redeliver; the ingress dedupes.
 - Reply-able providers (a GitHub PR comment an agent might answer) can additionally bridge into extmsg as an adapter later; v1 emits bus events only.
 
@@ -31,7 +31,7 @@ Design:
 2. **Done (task-h5q).** `internal/webhookd` exists: `POST /hooks/{provider}` handler (`handler.go`), `Verifier`/`GitHubVerifier` doing GitHub HMAC-SHA256 over the raw body via `X-Hub-Signature-256` (`verify.go`), and a bounded TTL `DeliveryDedup` cache keyed on `X-GitHub-Delivery` (`dedup.go`). Table-driven tests cover valid/invalid/missing signatures and duplicate-delivery no-ops (`handler_test.go`, `verify_test.go`, `dedup_test.go`). The package is self-contained and dependency-injected (`EmitEventFunc`) but not yet mounted on any live mux — that's step 3.
 3. Wire exposure: mount `webhookd.Handler` on a live port, add its config to `internal/config.City`'s TOML schema, add `WebhookInbound` to `events.KnownEventTypes` plus the Huma/SSE typed-envelope union in `internal/api`, `tailscale funnel <port>` route, document the public URL + GitHub webhook setup (repo settings → webhook → secret) in the service doc.
 4. Point one real GitHub repo's webhook at it; verify an issue comment lands on `/v0/events/stream` end-to-end.
-5. Retire `github_pr_monitor.go` polling for repos covered by webhooks (same PR as step 4 or immediately after — gate-or-delete).
+5. If a GitHub PR-polling connector exists by then, retire it for repos covered by webhooks (same PR as step 4 or immediately after — gate-or-delete). None exists in this repo as of this writing.
 6. Mayor subscription: per `Plans/mayor-agent-architecture.md`, mayor consumes `webhook.inbound` filtered by provider/event_kind.
 
 ## Answered questions (from the original stub)
@@ -39,7 +39,7 @@ Design:
 - *Funnel available on current plan?* Yes — already on and serving.
 - *Queue substrate?* The existing events bus + Dolt persistence; no new infra.
 - *How do agents get events?* The existing typed SSE stream `/v0/events/stream`; extmsg bindings for conversation-shaped sources.
-- *Priority event types?* GitHub first (replaces an existing poller and unblocks CI/PR-comment context); Vercel second; appointment webhooks once a provider is chosen.
+- *Priority event types?* GitHub first (unblocks CI/PR-comment context); Vercel second; appointment webhooks once a provider is chosen.
 
 ## Related
 
