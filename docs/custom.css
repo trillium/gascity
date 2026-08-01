@@ -9,6 +9,16 @@ html {
   font-size: 1.2rem;
 }
 
+/* ── Mobile: Mintlify's nav bar, menu trigger, and mobile menu items are
+   sized in rem against the root, so the 1.2rem bump above inflates them
+   20% on phones too. Restore the 1rem baseline Mintlify's mobile layout
+   (< 1024px, its own "lg" breakpoint) was actually designed for. ── */
+@media (max-width: 1023px) {
+  html {
+    font-size: 1rem;
+  }
+}
+
 /* ── Body text colors ── */
 body {
   color: #f0ece4;
