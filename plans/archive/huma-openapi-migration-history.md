@@ -1,6 +1,6 @@
 # Archive: Huma + OpenAPI migration — phase history and design research
 
-This is the historical companion to `plans/huma-openapi-migration.md`. The
+This is the historical companion to `plans/archive/huma-openapi-migration.md`. The
 live plan keeps only current guidance (principles, core contract, test
 rubric, spec-publishing flow). Everything below is kept for context on why
 particular decisions were made — it is NOT current-state documentation.
@@ -899,7 +899,7 @@ OpenAPI 3.0 downgrade output; some generators prefer it.
 - `ErrorModel` (Problem Details) is a named type, enabling
   consistent error parsing.
 
-**Files:** `plans/huma-openapi-migration.md`, experimental scratch
+**Files:** `plans/archive/huma-openapi-migration.md`, experimental scratch
 output (not committed).
 
 ### Fix 3a: Generate a typed Go client from the spec
