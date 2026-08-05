@@ -8,8 +8,8 @@ Agents need external events (GitHub comments, CI results, appointment confirmati
 
 ## What already exists (verified 2026-07-06)
 
-- **Event bus + agent subscription: SOLVED.** `internal/events` is a typed event bus; payloads implementing `events.Payload` flow through the central registry and emerge on the typed **`/v0/events/stream`** wire with named schemas (see `internal/extmsg/events.go` for the pattern). Agents subscribe by event type. No Redis, no JSONL, no new queue — the answer to "what substrate" is *the bus that's already there*, persisted via the Dolt-backed `events`/`wisp_events` tables (`internal/beads/native_dolt_store.go`).
-- **Conversational routing: SOLVED.** `internal/extmsg` is the external-message fabric (adapters, bindings, delivery, per-conversation session ownership) — openclaw-bridge (#3435) ships iMessage + Telegram connectors on it. Reply-able external sources belong here; fire-and-forget events belong on the bus directly.
+- **Event bus + agent subscription: SOLVED.** `internal/events` is a typed event bus; payloads implementing `events.Payload` flow through the central registry and emerge on the typed **`/v0/events/stream`** wire with named schemas (see `internal/extmsg/events.go` for the pattern). Agents subscribe by event type. No Redis, no new queue — the answer to "what substrate" is *the bus that's already there*, persisted by `events.FileRecorder` as an append-only JSONL log with size/interval rotation and gzip archival (`internal/events/recorder.go`, `internal/events/rotation.go`, read back via `internal/events/reader.go`).
+- **Conversational routing: SOLVED.** `internal/extmsg` is the external-message fabric (adapters, bindings, delivery, per-conversation session ownership) — it defines a `TransportAdapter` interface plus a registry (`adapter_registry.go`) and ships a generic HTTP adapter (`http_adapter.go`); concrete per-provider connectors are supplied by consumers. Reply-able external sources belong here; fire-and-forget events belong on the bus directly.
 - **Inbound exposure: SOLVED.** Tailscale Funnel is **already enabled and serving** on this machine (`tailscale funnel status` → `https://macbook.hippo-tilapia.ts.net`). External webhooks can POST to a funneled port today. Outbound was never blocked — Tailscale nodes have ordinary egress.
 - **No existing poller to retire.** A repo survey (2026-07-06) found no GitHub PR-polling connector under `internal/config/` or elsewhere in this repo today; the "retire the poller" framing in the original stub does not apply until such a connector exists.
 
@@ -32,18 +32,18 @@ Design:
 3. Wire exposure: mount `webhookd.Handler` on a live port, add its config to `internal/config.City`'s TOML schema, add `WebhookInbound` to `events.KnownEventTypes` plus the Huma/SSE typed-envelope union in `internal/api`, `tailscale funnel <port>` route, document the public URL + GitHub webhook setup (repo settings → webhook → secret) in the service doc.
 4. Point one real GitHub repo's webhook at it; verify an issue comment lands on `/v0/events/stream` end-to-end.
 5. If a GitHub PR-polling connector exists by then, retire it for repos covered by webhooks (same PR as step 4 or immediately after — gate-or-delete). None exists in this repo as of this writing.
-6. Mayor subscription: per `Plans/mayor-agent-architecture.md`, mayor consumes `webhook.inbound` filtered by provider/event_kind.
+6. Consumer subscription: have an overseer agent consume `webhook.inbound` filtered by provider/event_kind. This is pack configuration, not SDK code — per the ZERO-hardcoded-roles rule in `AGENTS.md`, no role name may appear in Go, so the subscription is expressed in a pack's agent definition (e.g. `examples/gastown/packs/gastown/agents/mayor/agent.toml` and its `prompt.template.md`) reading the typed `/v0/events/stream` wire. There is no SDK-level architecture doc for this and there should not be one.
 
 ## Answered questions (from the original stub)
 
 - *Funnel available on current plan?* Yes — already on and serving.
-- *Queue substrate?* The existing events bus + Dolt persistence; no new infra.
+- *Queue substrate?* The existing events bus + its rotating JSONL event log; no new infra.
 - *How do agents get events?* The existing typed SSE stream `/v0/events/stream`; extmsg bindings for conversation-shaped sources.
 - *Priority event types?* GitHub first (unblocks CI/PR-comment context); Vercel second; appointment webhooks once a provider is chosen.
 
 ## Related
 
-- `Plans/mayor-agent-architecture.md` — mayor is the primary event consumer
 - `internal/extmsg/` — fabric for reply-able external conversations
-- `contrib/openclaw-bridge/` — reference connector implementation shape
+- `internal/extmsg/http_adapter.go` — reference `TransportAdapter` implementation shape
+- `examples/gastown/packs/gastown/agents/mayor/` — pack-level agent definition; where an overseer's event subscription is configured
 - `~/code/localmodels/Plans/distributed-overnight-inference.md` — local agents also need event context
