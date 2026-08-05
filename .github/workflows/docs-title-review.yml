@@ -40,6 +40,33 @@ jobs:
               return;
             }
 
+            // The reviewer is a collaborator on the canonical repo but not
+            // necessarily on forks that inherit this workflow. Requesting a
+            // review from a non-collaborator is a hard 422, which would fail
+            // every docs-titled PR on such a fork. Check the precondition
+            // explicitly instead: skip where it cannot hold, and let any other
+            // API failure surface as a real failure.
+            let isCollaborator = true;
+            try {
+              await github.rest.repos.checkCollaborator({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: reviewer,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+              isCollaborator = false;
+            }
+            if (!isCollaborator) {
+              console.log(
+                `Skipping review request: ${reviewer} is not a collaborator on ` +
+                  `${context.repo.owner}/${context.repo.repo}`,
+              );
+              return;
+            }
+
             const current = await github.rest.pulls.listRequestedReviewers({
               owner: context.repo.owner,
               repo: context.repo.repo,
