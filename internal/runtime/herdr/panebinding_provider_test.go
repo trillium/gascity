@@ -589,6 +589,42 @@ func TestStartRecyclesAllStaleTabs(t *testing.T) {
 	}
 }
 
+// An agent whose env carries GC_HERDR_*_LABEL must be placed under those
+// labels, and a restart must recycle the previous life's tab by the same
+// (emoji) label rather than leaving it behind or closing a differently
+// labeled tab.
+func TestStartRecyclesStaleTabsByEmojiLabel(t *testing.T) {
+	p, state := newFakeHerdrProvider(t)
+	listenHerdrSocket(t, p)
+	setState(t, state, "stale_tabs")
+	oldWorkspaceList := "workspace_list)\n  : > \"$STATE/placement_attempted\"\n  printf '%s' '{\"result\":{\"workspaces\":[]}}' ;;"
+	newWorkspaceList := "workspace_list)\n  printf '%s' '{\"result\":{\"workspaces\":[{\"workspace_id\":\"w1\",\"label\":\"👑 Mayor\"}]}}' ;;"
+	rewriteFake(t, p, oldWorkspaceList, newWorkspaceList)
+	oldTabs := `{"tab_id":"t-old1","label":"witness"},{"tab_id":"t-old2","label":"witness"}`
+	newTabs := `{"tab_id":"t-old1","label":"👑 Mayor"},{"tab_id":"t-old2","label":"👑 Mayor"}`
+	rewriteFake(t, p, oldTabs, newTabs)
+
+	cfg := runtime.Config{Command: "claude", Env: map[string]string{
+		"GC_HERDR_WORKSPACE_LABEL": "👑 Mayor",
+		"GC_HERDR_TAB_LABEL":       "👑 Mayor",
+	}}
+	if err := p.Start(context.Background(), "mayor", cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	calls := fakeCalls(t, state)
+	for _, tab := range []string{"tab close t-old1", "tab close t-old2"} {
+		if !strings.Contains(calls, tab) {
+			t.Errorf("stale emoji-labeled tab not recycled (%s missing):\n%s", tab, calls)
+		}
+	}
+	if strings.Contains(calls, "tab close t-other") {
+		t.Errorf("closed another session's tab:\n%s", calls)
+	}
+	if !strings.Contains(calls, "tab create --workspace w1 --label 👑 Mayor") {
+		t.Errorf("replacement tab not created under the emoji label:\n%s", calls)
+	}
+}
+
 // rewriteFake patches the fake herdr script in place.
 func rewriteFake(t *testing.T, p *Provider, old, replacement string) {
 	t.Helper()

@@ -188,5 +188,29 @@ workspace/tab structure mirrors the town:
   `polecat-<themed-name>` tabs; the placement is display-only and does not
   change agent identity.
 
+### Custom workspace and tab labels
+
+An agent can choose its own herdr labels by setting these keys in its `env`:
+
+| Variable | Overrides |
+|---|---|
+| `GC_HERDR_WORKSPACE_LABEL` | the workspace label |
+| `GC_HERDR_TAB_LABEL` | the tab label |
+
+Either may be set alone; a blank value is ignored. Labels are free text and
+may contain Unicode and emoji. They are display-only: the agent name stays
+ASCII and unchanged, so `gc session`, mail, and bead assignees keep working.
+Set them in a pack patch:
+
+```toml
+[[patches.agent]]
+name = "mayor"
+env = { GC_HERDR_WORKSPACE_LABEL = "👑 Mayor", GC_HERDR_TAB_LABEL = "👑 Mayor" }
+```
+
+Keep the values stable. On each start gc finds the agent's previous tab by its
+label and closes it, so changing a label orphans the old tab, and renaming a
+workspace in herdr by hand makes the next start create a second workspace.
+
 See `internal/runtime/herdr-provider-design.md` in the source tree for the
 provider's design notes, capabilities, and pilot rationale.
