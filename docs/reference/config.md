@@ -524,6 +524,15 @@ GitHubPRMonitorPatch modifies an existing GitHub PR readiness monitor by name.
 | `poll_interval` | string |  |  | PollInterval overrides the optional polling cadence. |
 | `merge_queue` | string |  |  | MergeQueuePolicy overrides merge-queue signal handling. Enum: `ignore`, `observe`, `repair` |
 
+## HerdrSessionConfig
+
+HerdrSessionConfig holds settings for the herdr session provider.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `session` | string |  |  | Session names the herdr session the city runs in. Empty (the default) uses the city name. Set it to "default" to share the herdr you already run instead of creating a session of the city's own. |
+| `manage_server` | boolean |  | `true` | ManageServer controls whether gc owns the herdr session-server's lifecycle: starting it when absent and stopping it on gc stop and supervisor shutdown. Defaults to true. Set it to false when the session is one gc does not own (for example your default herdr); gc then never starts or stops the server, which must already be running. |
+
 ## Import
 
 Import defines a named import of another pack.
@@ -892,6 +901,7 @@ SessionConfig holds session provider settings.
 | `provider` | string |  |  | Provider selects the session backend: "fake", "fail", "subprocess", "acp", "exec:&lt;script&gt;", "k8s", or "" (default: tmux). |
 | `k8s` | K8sConfig |  |  | K8s holds Kubernetes-specific settings for the native K8s provider. |
 | `acp` | ACPSessionConfig |  |  | ACP holds settings for the ACP (Agent Client Protocol) session provider. |
+| `herdr` | HerdrSessionConfig |  |  | Herdr holds settings for the herdr session provider. |
 | `setup_timeout` | string |  | `10s` | SetupTimeout is the per-command/script timeout for session setup and pre_start commands. Duration string (e.g., "10s", "30s"). Defaults to "10s". |
 | `setup_max_timeout` | string |  |  | SetupMaxTimeout enables an activity-aware budget for session setup and pre_start commands. When set (e.g. "10m"), a setup command is no longer killed after setup_timeout of wall clock; instead setup_timeout bounds how long it may run without producing output (idle budget) and setup_max_timeout bounds its total runtime regardless of output (the runaway ceiling). A slow but healthy command — a large worktree checkout streaming progress — survives, while a hung one still dies after setup_timeout of silence. Duration string. Empty (the default) keeps the fixed setup_timeout deadline. |
 | `nudge_ready_timeout` | string |  | `10s` | NudgeReadyTimeout is how long to wait for the agent to be ready before sending nudge text. Duration string. Defaults to "10s". |

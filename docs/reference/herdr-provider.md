@@ -175,6 +175,28 @@ live state rather than trusting an event. The delay is bounded by the reconcile
 interval only while the controller keeps up: ticks run one at a time, so a busy
 controller stretches it. That is the thing to watch during a pilot.
 
+## Session and server ownership
+
+By default a city runs in its own herdr session named for the city, and gc
+owns that session's server: it starts the server when absent and runs
+`herdr session stop` on `gc stop` and supervisor shutdown. To run in a herdr
+session you already use, such as `default`, without letting gc stop it:
+
+```toml
+[session]
+provider = "herdr"
+
+[session.herdr]
+session = "default"      # herdr session to use; empty means the city name
+manage_server = false    # gc never starts or stops the server; default true
+```
+
+With `manage_server = false` the server must already be running: gc does not
+start it, and `gc stop` leaves it, and every other workspace in it, alone. Only
+the agent tabs gc created are closed. The setting is read when the provider is
+built, so changing it on a running city takes effect through the provider swap
+the controller already performs on a config reload.
+
 ## Layout
 
 Within the single per-city herdr session-server, gc places agents so the

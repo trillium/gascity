@@ -96,11 +96,9 @@ func buildRuntimeRegistry() *registry.Registry {
 	// internal/runtime/herdr-provider-design.md. Agents run on the host, and
 	// runPreStart executes cfg.PreStart there before the agent is created.
 	must(r.Register("herdr", func(_ string, sc config.SessionConfig, cityName, cityPath string) (runtime.Provider, error) {
-		session := cityName
-		if session == "" {
-			session = "default"
-		}
-		return sessionherdr.New(session, providerStateDir("herdr", cityPath), cityPath, sc.SetupTimeoutDuration(), sc.SetupMaxTimeoutDuration()), nil
+		hs := herdrSessionSettings(sc.Herdr, cityName)
+		return sessionherdr.New(hs.session, providerStateDir("herdr", cityPath), cityPath, sc.SetupTimeoutDuration(), sc.SetupMaxTimeoutDuration(),
+			sessionherdr.WithManageServer(hs.manageServer)), nil
 	}, hostFilesystemAndPreStart))
 	must(r.Register("hybrid", func(_ string, sc config.SessionConfig, cityName, cityPath string) (runtime.Provider, error) {
 		return newHybridProvider(sc, cityName, cityPath)
@@ -264,4 +262,24 @@ func acpProviderConfig(a config.ACPSessionConfig) sessionacp.Config {
 		StopGrace:         a.StopGraceDuration(),
 		CancelTimeout:     a.CancelTimeoutDuration(),
 	}
+}
+
+// herdrSettings is the resolved herdr session choice for a city.
+type herdrSettings struct {
+	session      string
+	manageServer bool
+}
+
+// herdrSessionSettings resolves [session.herdr] for a city: the herdr session
+// is the configured override, else the city name, else "default"; gc owns the
+// server unless manage_server is false.
+func herdrSessionSettings(hc config.HerdrSessionConfig, cityName string) herdrSettings {
+	session := strings.TrimSpace(hc.Session)
+	if session == "" {
+		session = cityName
+	}
+	if session == "" {
+		session = "default"
+	}
+	return herdrSettings{session: session, manageServer: hc.ManageServerEnabled()}
 }

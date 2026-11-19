@@ -36,6 +36,21 @@ type Provider struct {
 	// act is the tracker-backed activity source behind GetLastActivity /
 	// CanReportActivity (#4217); started lazily on first GetLastActivity.
 	act activityTracker
+	// unmanagedServer, when set, means gc does not own the herdr
+	// session-server: ConfigureServer and TeardownServer do nothing, so gc
+	// never starts it and never runs `herdr session stop` on it.
+	unmanagedServer bool
+}
+
+// Option adjusts a Provider at construction.
+type Option func(*Provider)
+
+// WithManageServer sets whether gc owns the herdr session-server lifecycle
+// (the default). With manage false, ConfigureServer and TeardownServer are
+// no-ops: use it when the session is one gc must not start or stop, such as
+// the user's default herdr. The server must then already be running.
+func WithManageServer(manage bool) Option {
+	return func(p *Provider) { p.unmanagedServer = !manage }
 }
 
 // defaultSetupTimeout mirrors the tmux provider's [session] setup_timeout
@@ -56,7 +71,7 @@ var (
 // command ([session] setup_timeout); non-positive values fall back to
 // defaultSetupTimeout. setupMaxTimeout enables the activity-aware pre_start
 // budget ([session] setup_max_timeout).
-func New(herdrSession, metaDir, cityRoot string, setupTimeout, setupMaxTimeout time.Duration) *Provider {
+func New(herdrSession, metaDir, cityRoot string, setupTimeout, setupMaxTimeout time.Duration, opts ...Option) *Provider {
 	if metaDir == "" {
 		// Per-euid, because the fallback path is otherwise identical for every
 		// user on the host and os.MkdirAll succeeds on a directory someone else
@@ -70,18 +85,35 @@ func New(herdrSession, metaDir, cityRoot string, setupTimeout, setupMaxTimeout t
 	if setupTimeout <= 0 {
 		setupTimeout = defaultSetupTimeout
 	}
-	return &Provider{c: newClient(herdrSession, cityRoot), metaDir: metaDir, setupTimeout: setupTimeout, setupMaxTimeout: setupMaxTimeout}
+	p := &Provider{c: newClient(herdrSession, cityRoot), metaDir: metaDir, setupTimeout: setupTimeout, setupMaxTimeout: setupMaxTimeout}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // ── ServerLifecycleProvider: own the shared herdr session-server ─────────────
 
 // ConfigureServer ensures the shared herdr session-server is running. A named
 // session's socket does not exist until its server starts, so this must run
-// before any agent op. Idempotent.
-func (p *Provider) ConfigureServer() error { return p.c.startServer() }
+// before any agent op. Idempotent. A no-op when gc does not manage the server
+// (WithManageServer(false)).
+func (p *Provider) ConfigureServer() error {
+	if p.unmanagedServer {
+		return nil
+	}
+	return p.c.startServer()
+}
 
 // TeardownServer stops the shared herdr session-server after sessions drain.
-func (p *Provider) TeardownServer() error { return p.c.stopServer() }
+// A no-op when gc does not manage the server (WithManageServer(false)), so a
+// session gc does not own is never stopped.
+func (p *Provider) TeardownServer() error {
+	if p.unmanagedServer {
+		return nil
+	}
+	return p.c.stopServer()
+}
 
 // ── Provider core ────────────────────────────────────────────────────────────
 

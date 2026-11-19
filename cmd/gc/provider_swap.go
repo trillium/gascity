@@ -60,7 +60,8 @@ func carriedSessionLegs(old sessionLegs, oldCfg, newCfg *config.City, oldName, n
 		return carried
 	}
 	if oldName == newName && !packRuntimeDeclarationChanged(oldCfg, newCfg, newName) &&
-		oldCfg.Session.Socket == newCfg.Session.Socket && oldCfg.Session.RemoteMatch == newCfg.Session.RemoteMatch {
+		oldCfg.Session.Socket == newCfg.Session.Socket && oldCfg.Session.RemoteMatch == newCfg.Session.RemoteMatch &&
+		herdrSessionSettings(oldCfg.Session.Herdr, oldCfg.Workspace.Name) == herdrSessionSettings(newCfg.Session.Herdr, newCfg.Workspace.Name) {
 		carried.base = old.base
 	}
 	if acpProviderConfig(oldCfg.Session.ACP) == acpProviderConfig(newCfg.Session.ACP) {
