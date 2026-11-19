@@ -1241,6 +1241,29 @@ func placementFor(name, town string, env map[string]string) (workspace, tab stri
 			tab = tab[:i] + leaf
 		}
 	}
+	return applyLabelOverrides(env, workspace, tab)
+}
+
+// Env keys that let an agent choose its herdr workspace and tab labels. They
+// affect display only: agent identity (session name, alias) is untouched, so
+// labels may carry any Unicode text, emoji included ("👑 Mayor").
+const (
+	envWorkspaceLabel = "GC_HERDR_WORKSPACE_LABEL"
+	envTabLabel       = "GC_HERDR_TAB_LABEL"
+)
+
+// applyLabelOverrides replaces the computed workspace and tab labels with the
+// non-blank GC_HERDR_WORKSPACE_LABEL / GC_HERDR_TAB_LABEL values from env.
+// Because Start recomputes placement from the same env on every launch, the
+// override is stable across restarts, so ensurePlacement's label match still
+// finds and closes the previous life's tab.
+func applyLabelOverrides(env map[string]string, workspace, tab string) (string, string) {
+	if v := strings.TrimSpace(env[envWorkspaceLabel]); v != "" {
+		workspace = v
+	}
+	if v := strings.TrimSpace(env[envTabLabel]); v != "" {
+		tab = v
+	}
 	return workspace, tab
 }
 
