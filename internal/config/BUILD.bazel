@@ -135,6 +135,7 @@ go_test(
         "generated_jq_required_other_test.go",
         "generated_jq_required_windows_test.go",
         "github_pr_monitor_test.go",
+        "herdr_session_config_test.go",
         "home_fallback_test.go",
         "implicit_agent_patch_repro_test.go",
         "implicit_test.go",
