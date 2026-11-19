@@ -550,3 +550,26 @@ func TestRuntimeRegistryExecRuntimesCarryTheSetupBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestHerdrSessionSettings(t *testing.T) {
+	off := false
+	tests := []struct {
+		name string
+		cfg  config.HerdrSessionConfig
+		city string
+		want herdrSettings
+	}{
+		{"defaults to the city name and manages the server", config.HerdrSessionConfig{}, "my-city", herdrSettings{"my-city", true}},
+		{"no city falls back to default", config.HerdrSessionConfig{}, "", herdrSettings{"default", true}},
+		{"session override", config.HerdrSessionConfig{Session: "default"}, "my-city", herdrSettings{"default", true}},
+		{"blank override is ignored", config.HerdrSessionConfig{Session: "  "}, "my-city", herdrSettings{"my-city", true}},
+		{"manage_server false", config.HerdrSessionConfig{Session: "default", ManageServer: &off}, "my-city", herdrSettings{"default", false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := herdrSessionSettings(tt.cfg, tt.city); got != tt.want {
+				t.Errorf("herdrSessionSettings(%+v, %q) = %+v, want %+v", tt.cfg, tt.city, got, tt.want)
+			}
+		})
+	}
+}

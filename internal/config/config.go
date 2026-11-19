@@ -1729,6 +1729,8 @@ type SessionConfig struct {
 	K8s K8sConfig `toml:"k8s,omitempty"`
 	// ACP holds settings for the ACP (Agent Client Protocol) session provider.
 	ACP ACPSessionConfig `toml:"acp,omitempty"`
+	// Herdr holds settings for the herdr session provider.
+	Herdr HerdrSessionConfig `toml:"herdr,omitempty"`
 	// SetupTimeout is the per-command/script timeout for session setup and
 	// pre_start commands. Duration string (e.g., "10s", "30s"). Defaults to "10s".
 	SetupTimeout string `toml:"setup_timeout,omitempty" jsonschema:"default=10s"`
@@ -1946,6 +1948,26 @@ type ACPSessionConfig struct {
 	// "10s", "30s"). Defaults to "10s"; non-positive or unparseable values
 	// fall back to the default.
 	CancelTimeout string `toml:"cancel_timeout,omitempty" jsonschema:"default=10s"`
+}
+
+// HerdrSessionConfig holds settings for the herdr session provider.
+type HerdrSessionConfig struct {
+	// Session names the herdr session the city runs in. Empty (the default)
+	// uses the city name. Set it to "default" to share the herdr you already
+	// run instead of creating a session of the city's own.
+	Session string `toml:"session,omitempty"`
+	// ManageServer controls whether gc owns the herdr session-server's
+	// lifecycle: starting it when absent and stopping it on gc stop and
+	// supervisor shutdown. Defaults to true. Set it to false when the session
+	// is one gc does not own (for example your default herdr); gc then never
+	// starts or stops the server, which must already be running.
+	ManageServer *bool `toml:"manage_server,omitempty" jsonschema:"default=true"`
+}
+
+// ManageServerEnabled reports whether gc owns the herdr server lifecycle.
+// Defaults to true when manage_server is unset.
+func (h HerdrSessionConfig) ManageServerEnabled() bool {
+	return h.ManageServer == nil || *h.ManageServer
 }
 
 // DefaultACPCancelTimeout is how long an ACP interrupt waits for

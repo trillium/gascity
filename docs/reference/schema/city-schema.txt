@@ -1948,6 +1948,22 @@
       ],
       "description": "GitHubPRMonitorPatch modifies an existing GitHub PR readiness monitor by name."
     },
+    "HerdrSessionConfig": {
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "Session names the herdr session the city runs in. Empty (the default)\nuses the city name. Set it to \"default\" to share the herdr you already\nrun instead of creating a session of the city's own."
+        },
+        "manage_server": {
+          "type": "boolean",
+          "description": "ManageServer controls whether gc owns the herdr session-server's\nlifecycle: starting it when absent and stopping it on gc stop and\nsupervisor shutdown. Defaults to true. Set it to false when the session\nis one gc does not own (for example your default herdr); gc then never\nstarts or stops the server, which must already be running.",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "HerdrSessionConfig holds settings for the herdr session provider."
+    },
     "Import": {
       "properties": {
         "source": {
@@ -3097,6 +3113,10 @@
         "acp": {
           "$ref": "#/$defs/ACPSessionConfig",
           "description": "ACP holds settings for the ACP (Agent Client Protocol) session provider."
+        },
+        "herdr": {
+          "$ref": "#/$defs/HerdrSessionConfig",
+          "description": "Herdr holds settings for the herdr session provider."
         },
         "setup_timeout": {
           "type": "string",

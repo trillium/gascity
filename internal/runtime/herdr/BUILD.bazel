@@ -96,6 +96,7 @@ go_test(
         "list_running_windows_test.go",
         "livegate_test.go",
         "liveness_test.go",
+        "manage_server_test.go",
         "no_named_agent_test.go",
         "pane_close_windows_test.go",
         "panebinding_live_test.go",
