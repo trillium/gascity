@@ -290,6 +290,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           MODE: ${{ steps.decide.outputs.mode }}
+          FORK_REPO: ${{ github.repository_owner_id != '255961667' }}
           FRESH: ${{ inputs.fresh-test-results }}
           SPLIT_STRICT_PATHS: ${{ steps.splitpaths.outputs.touched }}
         run: |
@@ -368,6 +369,13 @@ jobs:
             # gating lane: say so instead of passing silently.
             echo "::notice title=split-strict not run::this pull request touches the split-strict storage paths, but mode $MODE does not start the split-strict lane; it gates only same-repo PRs in mode remote"
             echo "split-strict: not run (mode $MODE); this PR touches the storage paths" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # A fork repository's own CI runs only the smoke lane: the unit,
+          # acceptance and integration-packages suites are sized for the
+          # upstream executors and their time budgets (T2), and a fork's
+          # 4-vCPU hosted runner cannot meet them.
+          if [ "${FORK_REPO:-false}" = true ]; then
+            lanes="$smoke"
           fi
           echo "lanes=[$lanes]" >> "$GITHUB_OUTPUT"
 

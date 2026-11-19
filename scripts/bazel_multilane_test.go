@@ -465,6 +465,7 @@ func TestBazelMultiLaneLaneList(t *testing.T) {
 	wantEnv := map[string]string{
 		"EVENT":              "${{ github.event_name }}",
 		"MODE":               "${{ steps.decide.outputs.mode }}",
+		"FORK_REPO":          "${{ github.repository_owner_id != '" + gastownhallOwnerID + "' }}",
 		"FRESH":              "${{ inputs.fresh-test-results }}",
 		"SPLIT_STRICT_PATHS": "${{ steps.splitpaths.outputs.touched }}",
 	}
@@ -530,6 +531,38 @@ func TestBazelMultiLaneLaneList(t *testing.T) {
 	for _, mode := range []string{"bogus", "skip"} {
 		if out, err := multiLaneLanes(t, step.Run, "pull_request", mode, "false"); err == nil {
 			t.Errorf("Lanes step accepted mode %s: %s", mode, out)
+		}
+	}
+}
+
+// TestBazelMultiLaneForkRepositoryRunsSmokeOnly: a fork repository's own CI
+// (FORK_REPO true) starts the smoke lane alone, whatever the event and mode;
+// the heavy suites are sized for the upstream executors.
+func TestBazelMultiLaneForkRepositoryRunsSmokeOnly(t *testing.T) {
+	wf := readMultiLaneWorkflow(t)
+	step := multiLaneRBEStep(t, wf, "lanes")
+	for _, event := range multiLaneEvents {
+		dir := t.TempDir()
+		output := filepath.Join(dir, "output")
+		out, err := runWorkflowStepScript(t, dir, step.Run, map[string]string{
+			"EVENT":               event,
+			"MODE":                "local",
+			"FORK_REPO":           "true",
+			"FRESH":               "false",
+			"SPLIT_STRICT_PATHS":  "false",
+			"GITHUB_OUTPUT":       output,
+			"GITHUB_STEP_SUMMARY": filepath.Join(dir, "summary"),
+		})
+		if err != nil {
+			t.Fatalf("Lanes step (event %s, fork repository) failed: %v\n%s", event, err, out)
+		}
+		raw, _ := readStepOutput(t, output, "lanes")
+		var entries []map[string]any
+		if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+			t.Fatalf("event %s: lanes %q: %v", event, raw, err)
+		}
+		if len(entries) != 1 || entries[0]["lane"] != "integration-smoke" {
+			t.Errorf("event %s, fork repository: lanes %s, want integration-smoke alone", event, raw)
 		}
 	}
 }
