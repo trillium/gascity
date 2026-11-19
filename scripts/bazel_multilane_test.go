@@ -465,6 +465,7 @@ func TestBazelMultiLaneLaneList(t *testing.T) {
 	wantEnv := map[string]string{
 		"EVENT":              "${{ github.event_name }}",
 		"MODE":               "${{ steps.decide.outputs.mode }}",
+		"FORK_REPO":          "${{ github.repository_owner_id != '" + gastownhallOwnerID + "' }}",
 		"FRESH":              "${{ inputs.fresh-test-results }}",
 		"SPLIT_STRICT_PATHS": "${{ steps.splitpaths.outputs.touched }}",
 	}
@@ -534,6 +535,38 @@ func TestBazelMultiLaneLaneList(t *testing.T) {
 	}
 }
 
+// TestBazelMultiLaneForkRepositoryRunsSmokeOnly: a fork repository's own CI
+// (FORK_REPO true) starts the smoke lane alone, whatever the event and mode;
+// the heavy suites are sized for the upstream executors.
+func TestBazelMultiLaneForkRepositoryRunsSmokeOnly(t *testing.T) {
+	wf := readMultiLaneWorkflow(t)
+	step := multiLaneRBEStep(t, wf, "lanes")
+	for _, event := range multiLaneEvents {
+		dir := t.TempDir()
+		output := filepath.Join(dir, "output")
+		out, err := runWorkflowStepScript(t, dir, step.Run, map[string]string{
+			"EVENT":               event,
+			"MODE":                "local",
+			"FORK_REPO":           "true",
+			"FRESH":               "false",
+			"SPLIT_STRICT_PATHS":  "false",
+			"GITHUB_OUTPUT":       output,
+			"GITHUB_STEP_SUMMARY": filepath.Join(dir, "summary"),
+		})
+		if err != nil {
+			t.Fatalf("Lanes step (event %s, fork repository) failed: %v\n%s", event, err, out)
+		}
+		raw, _ := readStepOutput(t, output, "lanes")
+		var entries []map[string]any
+		if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+			t.Fatalf("event %s: lanes %q: %v", event, raw, err)
+		}
+		if len(entries) != 1 || entries[0]["lane"] != "integration-smoke" {
+			t.Errorf("event %s, fork repository: lanes %s, want integration-smoke alone", event, raw)
+		}
+	}
+}
+
 // multiLaneLaneNames: every lane any (event, mode) starts.
 func multiLaneLaneNames() []string {
 	var names []string
@@ -575,9 +608,9 @@ func TestBazelMultiLaneWorkflowShape(t *testing.T) {
 	// lane's client-side loading and analysis is CPU-bound (ga-vnycm2.8:
 	// 23-34 s on 4 vCPU, 15-19 s on 8), and every other mode executes here,
 	// or may (a fork lane's fallback to the read-only cache). A fork
-	// repository's own CI has no Blacksmith: ubuntu-latest
+	// repository's own CI has no Blacksmith: ubuntu-24.04
 	// (TestBazelForkRepositoryFromEventContext).
-	if want := "${{ github.repository_owner_id != '" + gastownhallOwnerID + "' && 'ubuntu-latest' || (matrix.lane == 'unit' || matrix.lane == 'acceptance') && 'blacksmith-8vcpu-ubuntu-2404' || 'blacksmith-4vcpu-ubuntu-2404' }}"; lane.RunsOn != want {
+	if want := "${{ github.repository_owner_id != '" + gastownhallOwnerID + "' && 'ubuntu-24.04' || (matrix.lane == 'unit' || matrix.lane == 'acceptance') && 'blacksmith-8vcpu-ubuntu-2404' || 'blacksmith-4vcpu-ubuntu-2404' }}"; lane.RunsOn != want {
 		t.Errorf("lane runs-on = %q, want %q", lane.RunsOn, want)
 	}
 
@@ -1154,7 +1187,7 @@ var forkRepoEventCases = []struct {
 // whatever its owner's name, and gastownhall's own runs stay upstream after
 // an org rename (the owner's id decides). Upstream, every job runs on
 // Blacksmith; in a fork (no Blacksmith), every job that can run in mode
-// local runs on ubuntu-latest, or it would queue for a day and never start.
+// local runs on ubuntu-24.04, or it would queue for a day and never start.
 func TestBazelForkRepositoryFromEventContext(t *testing.T) {
 	wf := readMultiLaneWorkflow(t)
 	decide := multiLaneRBEStep(t, wf, "decide")
@@ -1211,8 +1244,8 @@ func TestBazelForkRepositoryFromEventContext(t *testing.T) {
 				if c.upstream && !strings.HasPrefix(got, "blacksmith-") {
 					t.Errorf("%s: job %s (lane %s) runs-on %q, want a Blacksmith label upstream", c.name, id, lane, got)
 				}
-				if !c.upstream && got != "ubuntu-latest" {
-					t.Errorf("%s: job %s (lane %s) runs-on %q in mode %s, want ubuntu-latest (no Blacksmith in a fork)", c.name, id, lane, got, mode)
+				if !c.upstream && got != "ubuntu-24.04" {
+					t.Errorf("%s: job %s (lane %s) runs-on %q in mode %s, want ubuntu-24.04 (no Blacksmith in a fork)", c.name, id, lane, got, mode)
 				}
 			}
 		}
