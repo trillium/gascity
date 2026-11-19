@@ -37,19 +37,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # The hermetic LLVM toolchain's ld.lld links against libxml2.so.2, which
-    # the stock ubuntu-latest runner image no longer ships. Where Bazel links
-    # locally (a fork's own CI, fork-cache, local mode) every GoLink fails
-    # with "ld.lld: error while loading shared libraries: libxml2.so.2".
-    # Installed only when the loader cannot already resolve it.
-    - name: Provide libxml2 for the hermetic linker
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        if ! ldconfig -p | grep -q 'libxml2\.so\.2'; then
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libxml2
-        fi
     # Keyed on what determines its content; saved only by a push to main that
     # missed the exact key (see the caller's "Save Bazel runner cache" step).
     # A lock change restores the previous lock's entry, which still holds most
