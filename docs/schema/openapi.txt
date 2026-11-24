@@ -2064,6 +2064,9 @@
             "$ref": "#/components/schemas/UnboundEventPayload"
           },
           {
+            "$ref": "#/components/schemas/WebhookInboundPayload"
+          },
+          {
             "$ref": "#/components/schemas/WorkerOperationEventPayload"
           }
         ]
@@ -7025,6 +7028,7 @@
             "session.updated": "#/components/schemas/TypedEventStreamEnvelopeSessionUpdated",
             "session.woke": "#/components/schemas/TypedEventStreamEnvelopeSessionWoke",
             "supervisor.fs_pressure.skipped_tick": "#/components/schemas/TypedEventStreamEnvelopeSupervisorFsPressureSkippedTick",
+            "webhook.inbound": "#/components/schemas/TypedEventStreamEnvelopeWebhookInbound",
             "worker.operation": "#/components/schemas/TypedEventStreamEnvelopeWorkerOperation"
           },
           "propertyName": "type"
@@ -7176,6 +7180,9 @@
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeSupervisorFsPressureSkippedTick"
+          },
+          {
+            "$ref": "#/components/schemas/TypedEventStreamEnvelopeWebhookInbound"
           },
           {
             "$ref": "#/components/schemas/TypedEventStreamEnvelopeWorkerOperation"
@@ -7722,7 +7729,8 @@
                 "extmsg.adapter_removed",
                 "extmsg.inbound",
                 "extmsg.outbound",
-                "events.rotated"
+                "events.rotated",
+                "webhook.inbound"
               ]
             },
             "type": "string"
@@ -9337,6 +9345,48 @@
         "title": "TypedEventStreamEnvelope supervisor.fs_pressure.skipped_tick",
         "type": "object"
       },
+      "TypedEventStreamEnvelopeWebhookInbound": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/WebhookInboundPayload"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "webhook.inbound",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload"
+        ],
+        "title": "TypedEventStreamEnvelope webhook.inbound",
+        "type": "object"
+      },
       "TypedEventStreamEnvelopeWorkerOperation": {
         "additionalProperties": false,
         "properties": {
@@ -9432,6 +9482,7 @@
             "session.updated": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionUpdated",
             "session.woke": "#/components/schemas/TypedTaggedEventStreamEnvelopeSessionWoke",
             "supervisor.fs_pressure.skipped_tick": "#/components/schemas/TypedTaggedEventStreamEnvelopeSupervisorFsPressureSkippedTick",
+            "webhook.inbound": "#/components/schemas/TypedTaggedEventStreamEnvelopeWebhookInbound",
             "worker.operation": "#/components/schemas/TypedTaggedEventStreamEnvelopeWorkerOperation"
           },
           "propertyName": "type"
@@ -9583,6 +9634,9 @@
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeSupervisorFsPressureSkippedTick"
+          },
+          {
+            "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeWebhookInbound"
           },
           {
             "$ref": "#/components/schemas/TypedTaggedEventStreamEnvelopeWorkerOperation"
@@ -10176,7 +10230,8 @@
                 "extmsg.adapter_removed",
                 "extmsg.inbound",
                 "extmsg.outbound",
-                "events.rotated"
+                "events.rotated",
+                "webhook.inbound"
               ]
             },
             "type": "string"
@@ -11944,6 +11999,52 @@
         "title": "TypedTaggedEventStreamEnvelope supervisor.fs_pressure.skipped_tick",
         "type": "object"
       },
+      "TypedTaggedEventStreamEnvelopeWebhookInbound": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/WebhookInboundPayload"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "const": "webhook.inbound",
+            "type": "string"
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/WorkflowEventProjection"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "ts",
+          "actor",
+          "payload",
+          "city"
+        ],
+        "title": "TypedTaggedEventStreamEnvelope webhook.inbound",
+        "type": "object"
+      },
       "TypedTaggedEventStreamEnvelopeWorkerOperation": {
         "additionalProperties": false,
         "properties": {
@@ -12004,6 +12105,36 @@
         "required": [
           "session_id",
           "count"
+        ],
+        "type": "object"
+      },
+      "WebhookInboundPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "event_kind": {
+            "type": "string"
+          },
+          "payload_digest": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "event_kind",
+          "delivery_id",
+          "payload_digest"
         ],
         "type": "object"
       },

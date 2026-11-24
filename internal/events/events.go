@@ -126,11 +126,7 @@ var KnownEventTypes = []string{
 	ExtMsgAdapterAdded, ExtMsgAdapterRemoved,
 	ExtMsgInbound, ExtMsgOutbound,
 	EventsRotated,
-	// WebhookInbound is omitted until internal/webhookd (which owns the
-	// payload registration) is imported by internal/api — that lands when
-	// step 3 wires the package into a live mux and internal/api
-	// (plans/event-stream-webhooks.md). Until then, subscribers receive
-	// it via the custom-event envelope.
+	WebhookInbound,
 }
 
 // Event is a single recorded occurrence in the system.

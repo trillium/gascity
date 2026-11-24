@@ -165,8 +165,20 @@ func NewSupervisorMux(resolver CityResolver, initializer cityInitializer, readOn
 	// as a prefix pattern only matches that subtree; everything else is
 	// a typed Huma operation registered at its real scoped path.
 	humaMux.HandleFunc("/v0/city/{cityName}/svc/", sm.serveCitySvcProxy)
+	// Webhook ingress is raw (not Huma) for the same reason: signature
+	// verification runs over the exact request bytes and the provider, not
+	// a CSRF-bearing client, is the caller.
+	humaMux.HandleFunc("POST /v0/city/{cityName}/hooks/{provider}", sm.serveCityHooks)
 	sm.server = &http.Server{Handler: sm.Handler()}
 	return sm
+}
+
+// serveCityHooks forwards /v0/city/{cityName}/hooks/{provider} to the
+// per-city Server's webhook handler at /hooks/{provider}.
+func (sm *SupervisorMux) serveCityHooks(w http.ResponseWriter, r *http.Request) {
+	cityName := r.PathValue("cityName")
+	provider := r.PathValue("provider")
+	sm.serveCityRequest(w, r, cityName, "/hooks/"+provider)
 }
 
 // serveCitySvcProxy forwards /v0/city/{cityName}/svc/... to the per-city

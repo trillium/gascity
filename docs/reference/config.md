@@ -28,6 +28,7 @@ City is the top-level configuration for a Gas City instance.
 | `daemon` | DaemonConfig |  |  | Daemon configures controller daemon settings. |
 | `orders` | OrdersConfig |  |  | Orders configures order settings (skip list). |
 | `api` | APIConfig |  |  | API configures the optional HTTP API server. |
+| `webhooks` | WebhooksConfig |  |  | Webhooks configures external webhook ingress (POST /v0/city/&#123;cityName&#125;/hooks/&#123;provider&#125;). Absent = no provider accepts deliveries. |
 | `chat_sessions` | ChatSessionsConfig |  |  | ChatSessions configures chat session behavior (auto-suspend). |
 | `session_sleep` | SessionSleepConfig |  |  | SessionSleep configures idle sleep policy defaults for managed sessions. |
 | `convergence` | ConvergenceConfig |  |  | Convergence configures convergence loop limits. |
@@ -332,6 +333,14 @@ FormulasConfig holds formula directory settings.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `dir` | string |  | `formulas` | Dir is the path to the formulas directory. Defaults to "formulas". |
+
+## GitHubWebhookConfig
+
+GitHubWebhookConfig configures GitHub webhook verification.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `secret_env` | string |  |  | SecretEnv names the environment variable holding the webhook's HMAC secret (repo settings -&gt; Webhooks -&gt; Secret). The secret value itself is never stored in config. Empty disables the GitHub provider. |
 
 ## Import
 
@@ -650,6 +659,14 @@ Tier defines per-token-type rates in USD per 1 million tokens.
 | `completion_usd_per_1m` | number | **yes** |  |  |
 | `cache_read_usd_per_1m` | number | **yes** |  |  |
 | `cache_creation_usd_per_1m` | number | **yes** |  |  |
+
+## WebhooksConfig
+
+WebhooksConfig configures per-provider webhook ingress.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `github` | GitHubWebhookConfig |  |  | GitHub configures GitHub webhook verification. |
 
 ## Workspace
 

@@ -16,15 +16,15 @@ func TestWebhookInboundPayloadRegistered(t *testing.T) {
 	if !ok {
 		t.Fatalf("no payload registered for %q", events.WebhookInbound)
 	}
-	if got, want := reflect.TypeOf(sample), reflect.TypeOf(InboundEventPayload{}); got != want {
+	if got, want := reflect.TypeOf(sample), reflect.TypeOf(WebhookInboundPayload{}); got != want {
 		t.Fatalf("payload for %q registered as %v, want %v", events.WebhookInbound, got, want)
 	}
 }
 
-// TestInboundEventPayloadRoundTrip pins the wire field names — subscribers
+// TestWebhookInboundPayloadRoundTrip pins the wire field names — subscribers
 // filter on provider/event_kind, and delivery_id is the idempotency key.
-func TestInboundEventPayloadRoundTrip(t *testing.T) {
-	in := InboundEventPayload{
+func TestWebhookInboundPayloadRoundTrip(t *testing.T) {
+	in := WebhookInboundPayload{
 		Provider:      "github",
 		EventKind:     "issue_comment",
 		DeliveryID:    "72d3162e-cc78-11e3-81ab-4c9367dc0958",
@@ -45,7 +45,7 @@ func TestInboundEventPayloadRoundTrip(t *testing.T) {
 			t.Fatalf("wire JSON missing %q: %s", key, raw)
 		}
 	}
-	var out InboundEventPayload
+	var out WebhookInboundPayload
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/molecule"
 	"github.com/gastownhall/gascity/internal/sling"
+	"github.com/gastownhall/gascity/internal/webhookd"
 )
 
 // extmsgNotifyTimeout bounds fire-and-forget goroutines spawned from
@@ -59,6 +60,10 @@ type Server struct {
 
 	// idem caches responses for Idempotency-Key replay on create endpoints.
 	idem *idempotencyCache
+
+	// webhookDedup deduplicates webhook redeliveries for the lifetime of
+	// this per-city Server.
+	webhookDedup *webhookd.DeliveryDedup
 
 	// lookPathCache caches exec.LookPath results with a short TTL to avoid
 	// repeated filesystem scans on every GET /v0/agents request.
@@ -159,8 +164,11 @@ func newServer(state State, readOnly bool) *Server {
 		mux:      mux,
 		readOnly: readOnly,
 		idem:     newIdempotencyCache(30 * time.Minute),
+
+		webhookDedup: webhookd.NewDeliveryDedup(0, 0),
 	}
 	mux.HandleFunc("/svc/", s.handleServiceProxy)
+	mux.HandleFunc("/hooks/", s.handleWebhook)
 	return s
 }
 
