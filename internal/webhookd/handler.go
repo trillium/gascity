@@ -15,7 +15,7 @@ import (
 )
 
 // maxBodyBytes bounds ingress memory per delivery. gascity only extracts a
-// compact summary from the body (InboundEventPayload does not carry the raw
+// compact summary from the body (WebhookInboundPayload does not carry the raw
 // body), so a delivery larger than this is rejected rather than buffered.
 const maxBodyBytes = 10 << 20 // 10MiB
 
@@ -124,7 +124,7 @@ func githubDeliveryID(h http.Header) string {
 }
 
 // githubInboundBody is the minimal subset of GitHub's webhook payload
-// shapes needed to populate InboundEventPayload's optional Actor/Subject
+// shapes needed to populate WebhookInboundPayload's optional Actor/Subject
 // summary. Best-effort only.
 type githubInboundBody struct {
 	Sender struct {
@@ -237,7 +237,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	digest := sha256.Sum256(body)
 
-	payload := InboundEventPayload{
+	payload := WebhookInboundPayload{
 		Provider:      provider,
 		EventKind:     eventKind,
 		DeliveryID:    deliveryID,

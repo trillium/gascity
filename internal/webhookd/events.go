@@ -7,13 +7,13 @@ package webhookd
 
 import "github.com/gastownhall/gascity/internal/events"
 
-// InboundEventPayload is emitted on events.WebhookInbound
+// WebhookInboundPayload is emitted on events.WebhookInbound
 // ("webhook.inbound") after a delivery passes signature verification.
 // It deliberately carries a summary, not the raw body — this package does
 // not persist raw deliveries today; PayloadDigest ties the event to the
 // delivery for a future raw-body store (plans/event-stream-webhooks.md,
 // step 3) rather than dumping the full payload onto the bus.
-type InboundEventPayload struct {
+type WebhookInboundPayload struct {
 	// Provider is the ingress route that accepted the delivery ("github",
 	// "vercel", ...).
 	Provider string `json:"provider"`
@@ -35,9 +35,9 @@ type InboundEventPayload struct {
 	PayloadDigest string `json:"payload_digest"`
 }
 
-// IsEventPayload marks InboundEventPayload as an events.Payload variant.
-func (InboundEventPayload) IsEventPayload() {}
+// IsEventPayload marks WebhookInboundPayload as an events.Payload variant.
+func (WebhookInboundPayload) IsEventPayload() {}
 
 func init() {
-	events.RegisterPayload(events.WebhookInbound, InboundEventPayload{})
+	events.RegisterPayload(events.WebhookInbound, WebhookInboundPayload{})
 }

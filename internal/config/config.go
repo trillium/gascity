@@ -201,6 +201,10 @@ type City struct {
 	Orders OrdersConfig `toml:"orders,omitempty"`
 	// API configures the optional HTTP API server.
 	API APIConfig `toml:"api,omitempty"`
+	// Webhooks configures external webhook ingress
+	// (POST /v0/city/{cityName}/hooks/{provider}). Absent = no provider
+	// accepts deliveries.
+	Webhooks WebhooksConfig `toml:"webhooks,omitempty"`
 	// ChatSessions configures chat session behavior (auto-suspend).
 	ChatSessions ChatSessionsConfig `toml:"chat_sessions,omitempty"`
 	// SessionSleep configures idle sleep policy defaults for managed sessions.
@@ -1499,6 +1503,21 @@ func (c OrdersConfig) MaxTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
+}
+
+// WebhooksConfig configures per-provider webhook ingress. A provider with
+// no secret_env configured rejects every delivery with 401.
+type WebhooksConfig struct {
+	// GitHub configures GitHub webhook verification.
+	GitHub GitHubWebhookConfig `toml:"github,omitempty"`
+}
+
+// GitHubWebhookConfig configures GitHub webhook verification.
+type GitHubWebhookConfig struct {
+	// SecretEnv names the environment variable holding the webhook's HMAC
+	// secret (repo settings -> Webhooks -> Secret). The secret value itself
+	// is never stored in config. Empty disables the GitHub provider.
+	SecretEnv string `toml:"secret_env,omitempty"`
 }
 
 // DefaultAPIPort is the default TCP port for the API server.

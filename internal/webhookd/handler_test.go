@@ -83,12 +83,12 @@ func TestHandlerValidDeliveryAccepted(t *testing.T) {
 	if got.eventType != events.WebhookInbound {
 		t.Fatalf("eventType = %q, want %q", got.eventType, events.WebhookInbound)
 	}
-	payload, ok := got.payload.(InboundEventPayload)
+	payload, ok := got.payload.(WebhookInboundPayload)
 	if !ok {
-		t.Fatalf("payload type = %T, want InboundEventPayload", got.payload)
+		t.Fatalf("payload type = %T, want WebhookInboundPayload", got.payload)
 	}
 	digest := sha256.Sum256(body)
-	want := InboundEventPayload{
+	want := WebhookInboundPayload{
 		Provider:      "github",
 		EventKind:     "issue_comment",
 		DeliveryID:    "delivery-1",
@@ -212,7 +212,7 @@ func TestHandlerUnparseableBodyStillAccepted(t *testing.T) {
 	if len(*emitted) != 1 {
 		t.Fatalf("EmitEvent called %d times, want 1", len(*emitted))
 	}
-	payload := (*emitted)[0].payload.(InboundEventPayload)
+	payload := (*emitted)[0].payload.(WebhookInboundPayload)
 	if payload.Actor != "" || payload.Subject != "" {
 		t.Fatalf("Actor/Subject = %q/%q, want empty for unparseable body", payload.Actor, payload.Subject)
 	}

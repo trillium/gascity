@@ -163,21 +163,13 @@ the canonical route, not the legacy route.
   and startup hints — not a primitive. Do not reconstruct the
   `Agent` / `Handle` interfaces.
 - **Webhook ingress (started task-h5q, in progress; plan:
-  `plans/event-stream-webhooks.md`).** `internal/webhookd` is a
-  self-contained, unmounted package: `Verifier`/`GitHubVerifier`
-  (HMAC-SHA256 over the raw body via `X-Hub-Signature-256`),
-  `DeliveryDedup` (bounded TTL cache keyed on `X-GitHub-Delivery`),
-  and `Handler` (`POST /hooks/{provider}`, GitHub only) that emits
-  `webhookd.InboundEventPayload` via an injected `EmitEventFunc`.
-  `events.WebhookInbound` is intentionally still absent from
-  `events.KnownEventTypes` (see the comment at its declaration in
-  `internal/events/events.go`) until a follow-up task mounts the
-  handler on a live mux/Funnel port, wires it into
-  `internal/config.City`'s TOML schema, and adds it to
-  `KnownEventTypes` plus the Huma/SSE typed-envelope union in
-  `internal/api`. Until then this package is dead code from the
-  binary's perspective — correctly so; the next task in the plan
-  doc's ordered list picks up from "wire exposure."
+  `plans/event-stream-webhooks.md`).** `internal/webhookd` (HMAC
+  `Verifier`/`GitHubVerifier`, `DeliveryDedup`, `Handler`) is mounted
+  at `POST /v0/city/{cityName}/hooks/{provider}` (GitHub only, secret
+  env var named by `[webhooks.github] secret_env`) and emits
+  `webhookd.WebhookInboundPayload` on `events.WebhookInbound`, which is
+  in `events.KnownEventTypes`. Remaining: Funnel route + docs, a real
+  end-to-end GitHub delivery, and pack-level consumers (plan steps 4-6).
 
 ## Design decisions (settled)
 

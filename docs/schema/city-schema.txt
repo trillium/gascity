@@ -995,6 +995,10 @@
           "$ref": "#/$defs/APIConfig",
           "description": "API configures the optional HTTP API server."
         },
+        "webhooks": {
+          "$ref": "#/$defs/WebhooksConfig",
+          "description": "Webhooks configures external webhook ingress\n(POST /v0/city/{cityName}/hooks/{provider}). Absent = no provider\naccepts deliveries."
+        },
         "chat_sessions": {
           "$ref": "#/$defs/ChatSessionsConfig",
           "description": "ChatSessions configures chat session behavior (auto-suspend)."
@@ -1258,6 +1262,17 @@
       "additionalProperties": false,
       "type": "object",
       "description": "FormulasConfig holds formula directory settings."
+    },
+    "GitHubWebhookConfig": {
+      "properties": {
+        "secret_env": {
+          "type": "string",
+          "description": "SecretEnv names the environment variable holding the webhook's HMAC\nsecret (repo settings -\u003e Webhooks -\u003e Secret). The secret value itself\nis never stored in config. Empty disables the GitHub provider."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "GitHubWebhookConfig configures GitHub webhook verification."
     },
     "Import": {
       "properties": {
@@ -2232,6 +2247,17 @@
         "cache_creation_usd_per_1m"
       ],
       "description": "Tier defines per-token-type rates in USD per 1 million tokens."
+    },
+    "WebhooksConfig": {
+      "properties": {
+        "github": {
+          "$ref": "#/$defs/GitHubWebhookConfig",
+          "description": "GitHub configures GitHub webhook verification."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "WebhooksConfig configures per-provider webhook ingress."
     },
     "Workspace": {
       "properties": {

@@ -3391,6 +3391,18 @@ type TypedEventStreamEnvelopeSupervisorFsPressureSkippedTick struct {
 	Workflow *WorkflowEventProjection               `json:"workflow,omitempty"`
 }
 
+// TypedEventStreamEnvelopeWebhookInbound defines model for TypedEventStreamEnvelopeWebhookInbound.
+type TypedEventStreamEnvelopeWebhookInbound struct {
+	Actor    string                   `json:"actor"`
+	Message  *string                  `json:"message,omitempty"`
+	Payload  WebhookInboundPayload    `json:"payload"`
+	Seq      int64                    `json:"seq"`
+	Subject  *string                  `json:"subject,omitempty"`
+	Ts       time.Time                `json:"ts"`
+	Type     string                   `json:"type"`
+	Workflow *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
 // TypedEventStreamEnvelopeWorkerOperation defines model for TypedEventStreamEnvelopeWorkerOperation.
 type TypedEventStreamEnvelopeWorkerOperation struct {
 	Actor    string                      `json:"actor"`
@@ -4058,6 +4070,19 @@ type TypedTaggedEventStreamEnvelopeSupervisorFsPressureSkippedTick struct {
 	Workflow *WorkflowEventProjection               `json:"workflow,omitempty"`
 }
 
+// TypedTaggedEventStreamEnvelopeWebhookInbound defines model for TypedTaggedEventStreamEnvelopeWebhookInbound.
+type TypedTaggedEventStreamEnvelopeWebhookInbound struct {
+	Actor    string                   `json:"actor"`
+	City     string                   `json:"city"`
+	Message  *string                  `json:"message,omitempty"`
+	Payload  WebhookInboundPayload    `json:"payload"`
+	Seq      int64                    `json:"seq"`
+	Subject  *string                  `json:"subject,omitempty"`
+	Ts       time.Time                `json:"ts"`
+	Type     string                   `json:"type"`
+	Workflow *WorkflowEventProjection `json:"workflow,omitempty"`
+}
+
 // TypedTaggedEventStreamEnvelopeWorkerOperation defines model for TypedTaggedEventStreamEnvelopeWorkerOperation.
 type TypedTaggedEventStreamEnvelopeWorkerOperation struct {
 	Actor    string                      `json:"actor"`
@@ -4075,6 +4100,16 @@ type TypedTaggedEventStreamEnvelopeWorkerOperation struct {
 type UnboundEventPayload struct {
 	Count     int64  `json:"count"`
 	SessionId string `json:"session_id"`
+}
+
+// WebhookInboundPayload defines model for WebhookInboundPayload.
+type WebhookInboundPayload struct {
+	Actor         *string `json:"actor,omitempty"`
+	DeliveryId    string  `json:"delivery_id"`
+	EventKind     string  `json:"event_kind"`
+	PayloadDigest string  `json:"payload_digest"`
+	Provider      string  `json:"provider"`
+	Subject       *string `json:"subject,omitempty"`
 }
 
 // WorkerOperationEventPayload defines model for WorkerOperationEventPayload.
@@ -5819,6 +5854,32 @@ func (t *EventPayload) MergeUnboundEventPayload(v UnboundEventPayload) error {
 	return err
 }
 
+// AsWebhookInboundPayload returns the union data inside the EventPayload as a WebhookInboundPayload
+func (t EventPayload) AsWebhookInboundPayload() (WebhookInboundPayload, error) {
+	var body WebhookInboundPayload
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromWebhookInboundPayload overwrites any union data inside the EventPayload as the provided WebhookInboundPayload
+func (t *EventPayload) FromWebhookInboundPayload(v WebhookInboundPayload) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeWebhookInboundPayload performs a merge with any union data inside the EventPayload, using the provided WebhookInboundPayload
+func (t *EventPayload) MergeWebhookInboundPayload(v WebhookInboundPayload) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsWorkerOperationEventPayload returns the union data inside the EventPayload as a WorkerOperationEventPayload
 func (t EventPayload) AsWorkerOperationEventPayload() (WorkerOperationEventPayload, error) {
 	var body WorkerOperationEventPayload
@@ -7315,6 +7376,34 @@ func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeSupervisorFsPres
 	return err
 }
 
+// AsTypedEventStreamEnvelopeWebhookInbound returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeWebhookInbound
+func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeWebhookInbound() (TypedEventStreamEnvelopeWebhookInbound, error) {
+	var body TypedEventStreamEnvelopeWebhookInbound
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedEventStreamEnvelopeWebhookInbound overwrites any union data inside the TypedEventStreamEnvelope as the provided TypedEventStreamEnvelopeWebhookInbound
+func (t *TypedEventStreamEnvelope) FromTypedEventStreamEnvelopeWebhookInbound(v TypedEventStreamEnvelopeWebhookInbound) error {
+	v.Type = "webhook.inbound"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedEventStreamEnvelopeWebhookInbound performs a merge with any union data inside the TypedEventStreamEnvelope, using the provided TypedEventStreamEnvelopeWebhookInbound
+func (t *TypedEventStreamEnvelope) MergeTypedEventStreamEnvelopeWebhookInbound(v TypedEventStreamEnvelopeWebhookInbound) error {
+	v.Type = "webhook.inbound"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsTypedEventStreamEnvelopeWorkerOperation returns the union data inside the TypedEventStreamEnvelope as a TypedEventStreamEnvelopeWorkerOperation
 func (t TypedEventStreamEnvelope) AsTypedEventStreamEnvelopeWorkerOperation() (TypedEventStreamEnvelopeWorkerOperation, error) {
 	var body TypedEventStreamEnvelopeWorkerOperation
@@ -7485,6 +7574,8 @@ func (t TypedEventStreamEnvelope) ValueByDiscriminator() (interface{}, error) {
 		return t.AsTypedEventStreamEnvelopeSessionWoke()
 	case "supervisor.fs_pressure.skipped_tick":
 		return t.AsTypedEventStreamEnvelopeSupervisorFsPressureSkippedTick()
+	case "webhook.inbound":
+		return t.AsTypedEventStreamEnvelopeWebhookInbound()
 	case "worker.operation":
 		return t.AsTypedEventStreamEnvelopeWorkerOperation()
 	default:
@@ -8874,6 +8965,34 @@ func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeSupe
 	return err
 }
 
+// AsTypedTaggedEventStreamEnvelopeWebhookInbound returns the union data inside the TypedTaggedEventStreamEnvelope as a TypedTaggedEventStreamEnvelopeWebhookInbound
+func (t TypedTaggedEventStreamEnvelope) AsTypedTaggedEventStreamEnvelopeWebhookInbound() (TypedTaggedEventStreamEnvelopeWebhookInbound, error) {
+	var body TypedTaggedEventStreamEnvelopeWebhookInbound
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromTypedTaggedEventStreamEnvelopeWebhookInbound overwrites any union data inside the TypedTaggedEventStreamEnvelope as the provided TypedTaggedEventStreamEnvelopeWebhookInbound
+func (t *TypedTaggedEventStreamEnvelope) FromTypedTaggedEventStreamEnvelopeWebhookInbound(v TypedTaggedEventStreamEnvelopeWebhookInbound) error {
+	v.Type = "webhook.inbound"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeTypedTaggedEventStreamEnvelopeWebhookInbound performs a merge with any union data inside the TypedTaggedEventStreamEnvelope, using the provided TypedTaggedEventStreamEnvelopeWebhookInbound
+func (t *TypedTaggedEventStreamEnvelope) MergeTypedTaggedEventStreamEnvelopeWebhookInbound(v TypedTaggedEventStreamEnvelopeWebhookInbound) error {
+	v.Type = "webhook.inbound"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsTypedTaggedEventStreamEnvelopeWorkerOperation returns the union data inside the TypedTaggedEventStreamEnvelope as a TypedTaggedEventStreamEnvelopeWorkerOperation
 func (t TypedTaggedEventStreamEnvelope) AsTypedTaggedEventStreamEnvelopeWorkerOperation() (TypedTaggedEventStreamEnvelopeWorkerOperation, error) {
 	var body TypedTaggedEventStreamEnvelopeWorkerOperation
@@ -9044,6 +9163,8 @@ func (t TypedTaggedEventStreamEnvelope) ValueByDiscriminator() (interface{}, err
 		return t.AsTypedTaggedEventStreamEnvelopeSessionWoke()
 	case "supervisor.fs_pressure.skipped_tick":
 		return t.AsTypedTaggedEventStreamEnvelopeSupervisorFsPressureSkippedTick()
+	case "webhook.inbound":
+		return t.AsTypedTaggedEventStreamEnvelopeWebhookInbound()
 	case "worker.operation":
 		return t.AsTypedTaggedEventStreamEnvelopeWorkerOperation()
 	default:
