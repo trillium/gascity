@@ -45,6 +45,9 @@ type Config struct {
 	NudgeReadyTimeout  time.Duration
 	NudgeRetryInterval time.Duration
 	NudgeLockTimeout   time.Duration
+	// NudgeSubmitVerifyTimeout is how long a nudge waits after Enter for the
+	// pane to change before it resends Enter.
+	NudgeSubmitVerifyTimeout time.Duration
 	// NudgeIdleTimeout is how long Nudge waits for the agent to become idle
 	// before sending the message. This prevents interrupting active tool calls.
 	// If the agent doesn't become idle within this timeout, the message is
@@ -62,13 +65,14 @@ type Config struct {
 // DefaultConfig returns a Config with the original hardcoded values.
 func DefaultConfig() Config {
 	return Config{
-		SetupTimeout:       10 * time.Second,
-		NudgeReadyTimeout:  10 * time.Second,
-		NudgeRetryInterval: 500 * time.Millisecond,
-		NudgeLockTimeout:   30 * time.Second,
-		NudgeIdleTimeout:   30 * time.Second,
-		DebounceMs:         500,
-		DisplayMs:          5000,
+		SetupTimeout:             10 * time.Second,
+		NudgeReadyTimeout:        10 * time.Second,
+		NudgeRetryInterval:       500 * time.Millisecond,
+		NudgeLockTimeout:         30 * time.Second,
+		NudgeSubmitVerifyTimeout: 2 * time.Second,
+		NudgeIdleTimeout:         30 * time.Second,
+		DebounceMs:               500,
+		DisplayMs:                5000,
 	}
 }
 
@@ -1428,7 +1432,30 @@ func (t *Tmux) NudgeSession(session, message string) error {
 	// detached but drop the submit key until a terminal resize wakes their loop.
 	t.WakePaneIfDetached(session)
 
-	// 5. Send Enter with retry (critical for message submission)
+	// 5. Send Enter and confirm the TUI consumed it (critical for message submission)
+	if err := t.sendEnterVerified(target); err != nil {
+		return err
+	}
+	// 6. Wake again so the submitted turn is processed promptly.
+	t.WakePaneIfDetached(session)
+	return nil
+}
+
+// submitVerifyLines is how much of the pane's tail is compared before and
+// after Enter to detect that the TUI reacted to the keystroke.
+const submitVerifyLines = 60
+
+// sendEnterVerified sends Enter to target and confirms the pane content
+// changed afterwards. tmux reports success as soon as the keystroke is queued,
+// but a TUI can drop it (for example while its input loop is asleep), leaving
+// the pasted prompt unsubmitted in the input buffer. When the pane does not
+// change within NudgeSubmitVerifyTimeout, Enter is sent again, up to 3 times,
+// and an error is returned if the pane never reacts.
+func (t *Tmux) sendEnterVerified(target string) error {
+	before, err := t.CapturePane(target, submitVerifyLines)
+	if err != nil {
+		return fmt.Errorf("capturing pane before submit: %w", err)
+	}
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -1438,11 +1465,35 @@ func (t *Tmux) NudgeSession(session, message string) error {
 			lastErr = err
 			continue
 		}
-		// 6. Wake again so the submitted turn is processed promptly.
-		t.WakePaneIfDetached(session)
-		return nil
+		changed, err := t.waitForPaneChange(target, before)
+		if err != nil {
+			return fmt.Errorf("verifying submit: %w", err)
+		}
+		if changed {
+			return nil
+		}
+		lastErr = fmt.Errorf("pane unchanged %s after Enter", t.cfg.NudgeSubmitVerifyTimeout)
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	return fmt.Errorf("submit not confirmed after 3 attempts: %w", lastErr)
+}
+
+// waitForPaneChange polls target until its captured tail differs from before
+// or NudgeSubmitVerifyTimeout elapses.
+func (t *Tmux) waitForPaneChange(target, before string) (bool, error) {
+	deadline := time.Now().Add(t.cfg.NudgeSubmitVerifyTimeout)
+	for {
+		now, err := t.CapturePane(target, submitVerifyLines)
+		if err != nil {
+			return false, err
+		}
+		if now != before {
+			return true, nil
+		}
+		if !time.Now().Before(deadline) {
+			return false, nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // NudgePane sends a message to a specific pane reliably.
@@ -1475,21 +1526,13 @@ func (t *Tmux) NudgePane(pane, message string) error {
 	// happens before and after submit.
 	t.WakePaneIfDetached(pane)
 
-	// 5. Send Enter with retry (critical for message submission)
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if _, err := t.run("send-keys", "-t", pane, "Enter"); err != nil {
-			lastErr = err
-			continue
-		}
-		// 6. Wake again so the submitted turn is processed promptly.
-		t.WakePaneIfDetached(pane)
-		return nil
+	// 5. Send Enter and confirm the TUI consumed it (critical for message submission)
+	if err := t.sendEnterVerified(pane); err != nil {
+		return err
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	// 6. Wake again so the submitted turn is processed promptly.
+	t.WakePaneIfDetached(pane)
+	return nil
 }
 
 func (t *Tmux) shouldSendEscapeBeforeEnter(target string) bool {
