@@ -61,11 +61,14 @@ PY
     return 124
 }
 
-version_output=$(run_bounded 10 dolt version 2>/dev/null)
+# Generous bound: `dolt version` can take several seconds when the host is
+# saturated (e.g. parallel test shards); a tight limit misreports load as a hang.
+version_timeout=30
+version_output=$(run_bounded "$version_timeout" dolt version 2>/dev/null)
 version_status=$?
 if [ "$version_status" -ne 0 ]; then
     if [ "$version_status" -eq 124 ]; then
-        echo "dolt version timed out after 10s"
+        echo "dolt version timed out after ${version_timeout}s"
         echo "retry after fixing local Dolt startup or PATH"
         exit 1
     fi
