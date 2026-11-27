@@ -420,3 +420,58 @@ func TestWaitForRuntimeReadyCapturesPromptAboveBlankFooter(t *testing.T) {
 		}
 	}
 }
+
+// droppedEnterExecutor simulates a TUI that drops the first dropEnters Enter
+// keystrokes: the pane content only changes once an Enter is accepted.
+type droppedEnterExecutor struct {
+	dropEnters int
+	enters     int
+}
+
+func (d *droppedEnterExecutor) executeCtx(_ context.Context, args []string) (string, error) {
+	return d.execute(args)
+}
+
+func (d *droppedEnterExecutor) execute(args []string) (string, error) {
+	for _, a := range args {
+		if a == "Enter" {
+			d.enters++
+			return "", nil
+		}
+		if a == "capture-pane" {
+			if d.enters > d.dropEnters {
+				return "> \nworking...", nil
+			}
+			return "> pasted prompt", nil
+		}
+	}
+	return "", nil
+}
+
+func newVerifyTestTmux(exec executor) *Tmux {
+	tm := NewTmux()
+	tm.exec = exec
+	tm.cfg.NudgeSubmitVerifyTimeout = 20 * time.Millisecond
+	return tm
+}
+
+func TestSendEnterVerifiedRetriesDroppedEnter(t *testing.T) {
+	exec := &droppedEnterExecutor{dropEnters: 1}
+	if err := newVerifyTestTmux(exec).sendEnterVerified("%1"); err != nil {
+		t.Fatalf("sendEnterVerified: %v", err)
+	}
+	if exec.enters != 2 {
+		t.Fatalf("Enter sent %d times, want 2", exec.enters)
+	}
+}
+
+func TestSendEnterVerifiedReportsUnconfirmedSubmit(t *testing.T) {
+	exec := &droppedEnterExecutor{dropEnters: 99}
+	err := newVerifyTestTmux(exec).sendEnterVerified("%1")
+	if err == nil || !strings.Contains(err.Error(), "submit not confirmed") {
+		t.Fatalf("err = %v, want submit not confirmed", err)
+	}
+	if exec.enters != 3 {
+		t.Fatalf("Enter sent %d times, want 3", exec.enters)
+	}
+}
